@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-这是一个 ESP-IDF 测试项目，用于演示 esp-rpc 框架 - 一个 H5/TypeScript 客户端与 ESP32 之间的 RPC 通信框架。项目同时支持 WebSocket 和 BLE（蓝牙低功耗）双传输方式，包含 ESP32 (C) 和客户端 (TypeScript) 的代码生成。
+这是一个 ESP-IDF 测试项目，用于演示 esp-rpc 框架 - 一个 H5/TypeScript 客户端与 ESP32 之间的 RPC 通信框架。项目同时支持 WebSocket 和 BLE（蓝牙低功耗）双传输方式，包含 ESP32 (C++) 和客户端 (TypeScript) 的代码生成。
 
 ## 构建命令
 
@@ -46,46 +46,45 @@ esp-rpc 组件位于 `../../`（`projects/` 的父目录）：
 - `include/` - 核心 RPC API 的 C 头文件
 - `src/` - C 实现（esprpc.c, esprpc_binary.c, transport 层）
 - `generator/` - Python 代码生成器
-- `rpc_macros.h` - 在 `.rpc.h` 文件中定义 RPC 服务的宏
+- `rpc_macros.hpp` - 在 `.rpc.hpp` 文件中定义 RPC 服务的宏
 
 ### 代码生成流程
 
-1. **在 `.rpc.h` 文件中定义 RPC 服务**，使用 `rpc_macros.h` 中的宏
-   - 示例：`main/user_service.rpc.h`
+1. **在 `.rpc.hpp` 文件中定义 RPC 服务**，使用 `rpc_macros.hpp` 中的宏
+   - 示例：`main/user_service.rpc.hpp`
    - 使用：`RPC_SERVICE`、`RPC_METHOD`、`RPC_STRUCT`、`RPC_ENUM` 等
 
 2. **CMake 构建触发代码生成**（见 `../../CMakeLists.txt:22-34`）
-   - 扫描所有 `*.rpc.h` 文件
+   - 扫描所有 `*.rpc.hpp` 文件
    - 构建时运行 `generator/main.py`
-   - 将 TypeScript stub 输出到 `ESPRPC_TS_STUB_OUTPUT_DIR`（在根 `CMakeLists.txt` 中配置）
+   - 将 TypeScript stub 输出到 `CONFIG_ESPRPC_TS_STUB_OUTPUT_DIR`（在 menuconfig 或 `sdkconfig.defaults` 中配置）
 
-3. **生成的 C 文件**（必须添加到 `main/CMakeLists.txt` 的 SRCS）：
-   - `<service>.rpc.c` - 分发/序列化代码（自动生成，**请勿编辑**）
-   - `<service>.rpc.dispatch.h` - 分发函数声明（自动生成）
-   - `<service>.rpc.impl.h` - 服务实例 extern 声明（自动生成）
+3. **生成的 C++ 文件**（必须添加到 `main/CMakeLists.txt` 的 SRCS）：
+   - `<service>.rpc.gen.hpp` - 分发函数声明 + 服务实例 extern（自动生成）
+   - `<service>.rpc.gen.cpp` - 分发/序列化代码（自动生成，**请勿编辑**）
 
-4. **用户实现**在 `<service>.rpc.impl_user.c` 中：
+4. **用户实现**在 `<service>.rpc.impl_user.cpp` 中：
    - 此文件**不会被**生成器覆盖
-   - 包含实际业务逻辑（如 `user_service.rpc.impl_user.c`）
+   - 包含实际业务逻辑（如 `user_service.rpc.impl_user.cpp`）
    - 命名为 `<method>_impl()` 的函数会被分发层调用
 
-### RPC 类型系统
+### RPC 类型系统（纯 C++ 模板）
 
 - **基础类型**：`int`、`bool`、`string` (char*)
-- **类型修饰符**：`REQUIRED(type)`、`OPTIONAL(type)`、`LIST(type)`、`MAP(key, value)`、`STREAM(type)`
-- **修饰符在编译时展开**为 C 结构体（见 `rpc_macros.h:20-23`）
-  - `OPTIONAL(string)` → `string_optional`（包含 `value` 和 `present` 布尔值的结构体）
-  - `LIST(User)` → `User_list`（包含 `items` 数组和 `len` 的结构体）
-  - `STREAM(User)` → `struct User_stream`，包含 `ctx` 指针
+- **类型修饰符**：`REQUIRED(type)`、`OPTIONAL(type)`、`LIST(type)`、`STREAM(type)`
+- **修饰符展开**为 C++ 模板（见 `rpc_macros.hpp`）
+  - `OPTIONAL(T)` → `rpc_optional<T>`
+  - `LIST(T)` → `rpc_list<T>`
+  - `STREAM(T)` → `rpc_stream<T>`，包含 `ctx` 指针
 
 ### 服务注册
 
-在 `main.c:112` 中：
+在 `main.cpp` 中：
 ```c
 esprpc_register_service_ex("UserService", &user_service_impl_instance, UserService_dispatch);
 ```
 
-服务实例必须在 impl 文件中定义（`user_service.rpc.impl_user.c` 定义实际的 `UserService` 结构体及函数指针）。
+服务实例在 gen.cpp 中定义，实现函数在 `user_service.rpc.impl_user.cpp` 中编写。
 
 ### 传输层
 
@@ -108,23 +107,22 @@ esprpc_register_service_ex("UserService", &user_service_impl_instance, UserServi
 
 ```
 main/
-├── main.c                     # app_main、WiFi 初始化、RPC 注册
+├── main.cpp                   # app_main、WiFi 初始化、RPC 注册
 ├── wifi_sta.c/h              # WiFi 事件处理器
 ├── wifi_config_local.h       # WiFi 凭据（不在 git 中，从示例创建）
-├── user_service.rpc.h         # RPC 服务定义（编辑此文件）
-├── user_service.rpc.c         # 生成的分发代码（请勿编辑）
-├── user_service.rpc.dispatch.h # 生成的头文件（请勿编辑）
-├── user_service.rpc.impl.h    # 生成的实例声明（请勿编辑）
-└── user_service.rpc.impl_user.c # 用户实现（编辑此文件，不会被覆盖）
+├── user_service.rpc.hpp      # RPC 服务定义（编辑此文件）
+├── user_service.rpc.gen.hpp  # 生成的头文件（请勿编辑）
+├── user_service.rpc.gen.cpp   # 生成的分发代码（请勿编辑）
+└── user_service.rpc.impl_user.cpp # 用户实现（编辑此文件，不会被覆盖）
 ```
 
 ## 添加新的 RPC 服务
 
-1. 创建 `main/new_service.rpc.h`，使用 RPC 宏定义服务
-2. 在 `main/CMakeLists.txt` 的 SRCS 中添加：`new_service.rpc.c`、`new_service.rpc.impl_user.c`
-3. 在 `new_service.rpc.impl_user.c` 中实现方法（从生成器输出创建）
+1. 创建 `main/new_service.rpc.hpp`，使用 RPC 宏定义服务
+2. 在 `main/CMakeLists.txt` 的 SRCS 中添加：`new_service.rpc.gen.cpp`、`new_service.rpc.impl_user.cpp`
+3. 在 `new_service.rpc.impl_user.cpp` 中实现方法（从生成器输出创建）
 4. 在 `main.c` 中注册：`esprpc_register_service_ex("NewService", &new_service_impl_instance, NewService_dispatch)`
-5. 构建项目 - 生成器将创建 `.rpc.c`、`.rpc.dispatch.h`、`.rpc.impl.h` 和 TS stubs
+5. 构建项目 - 生成器将创建 `.rpc.gen.hpp`、`.rpc.gen.cpp` 和 TS stubs
 
 ## SDK 配置
 

@@ -1,3 +1,6 @@
+# TS stub 输出目录（相对项目根，空则不生成 TS）
+CONFIG_ESPRPC_TS_STUB_OUTPUT_DIR="../preact-app/src/generated"
+
 # HTTP Server WebSocket 支持
 CONFIG_HTTPD_WS_SUPPORT=y
 

@@ -16,5 +16,4 @@ Payload 编码规则（请求与响应一致）:
 - OPTIONAL(T): [1B present][T if present]  (present=0 省略, present=1 紧跟值)
 - struct: 按字段顺序依次编码
 - LIST(T): [4B count LE][elem0][elem1]...
-- MAP: 暂不支持（方法参数中少见）
 """

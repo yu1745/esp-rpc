@@ -125,6 +125,8 @@ export function decodeResponse<T = unknown>(methodId: number, payload: Uint8Arra
       if (_pemail) { const _lemail = dv.getUint16(off, true); off += 2;
         result.email = new TextDecoder().decode(new Uint8Array(payload.buffer, payload.byteOffset + off, _lemail)); off += _lemail; }
       result.status = dv.getInt32(off, true); off += 4;
+      const _ltags = dv.getUint16(off, true); off += 2;
+      result.tags = new TextDecoder().decode(new Uint8Array(payload.buffer, payload.byteOffset + off, _ltags)); off += _ltags;
       return result;
     }
     if (methodId === 1) {
@@ -182,6 +184,8 @@ export function decodeResponse<T = unknown>(methodId: number, payload: Uint8Arra
         if (_pemail) { const _lemail = dv.getUint16(off, true); off += 2;
           item.email = new TextDecoder().decode(new Uint8Array(payload.buffer, payload.byteOffset + off, _lemail)); off += _lemail; }
         item.status = dv.getInt32(off, true); off += 4;
+        const _ltags = dv.getUint16(off, true); off += 2;
+        item.tags = new TextDecoder().decode(new Uint8Array(payload.buffer, payload.byteOffset + off, _ltags)); off += _ltags;
         items.push(item);
       }
       return { items, len: items.length };

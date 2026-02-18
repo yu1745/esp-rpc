@@ -18,11 +18,6 @@ def _extract_custom_type_names(type_str: str) -> set[str]:
         return _extract_custom_type_names(t[9:-1])
     if t.startswith('LIST('):
         return _extract_custom_type_names(t[5:-1])
-    if t.startswith('MAP('):
-        parts = t[4:-1].split(',', 1)
-        k = _extract_custom_type_names(parts[0])
-        v = _extract_custom_type_names(parts[1].strip()) if len(parts) > 1 else set()
-        return k | v
     if t.startswith('REQUIRED('):
         return _extract_custom_type_names(t[9:-1])
     return {t}
@@ -43,12 +38,6 @@ def c_type_to_ts(c_type: str) -> str:
     if t.startswith('LIST('):
         inner = t[5:-1].strip()
         return f'{c_type_to_ts(inner)}[]'
-    if t.startswith('MAP('):
-        # MAP(key, value)
-        parts = t[4:-1].split(',', 1)
-        k = parts[0].strip()
-        v = parts[1].strip() if len(parts) > 1 else 'string'
-        return f'Record<{c_type_to_ts(k)}, {c_type_to_ts(v)}>'
     if t.startswith('REQUIRED('):
         inner = t[9:-1].strip()
         return c_type_to_ts(inner)
@@ -171,7 +160,7 @@ def emit_all(schema: RpcSchema, base_name: str = 'rpc', transport_path: str = '.
         f"import type {{ EsprpcTransport }} from '{transport_path}';",
         "",
     ]
-    for i, svc in enumerate(schema.services):
+    for i, svc in enumerate[ServiceDef](schema.services):
         client_lines.append(emit_service(svc, transport_path=transport_path, include_import=False, svc_idx=i))
         client_lines.append('')
 

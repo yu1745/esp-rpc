@@ -6,14 +6,15 @@
  * 1. esprpc_transport_ws_init()
  * 2. esprpc_transport_add(esprpc_transport_ws_get())
  * 3. transport->start(ctx, esprpc_handle_request, NULL)
- * 4. WiFi 获 IP 后调用 esprpc_transport_ws_start_server()
- * 端点: ws://<ip>:80/ws
+ * 4. WiFi 获 IP 后调用 esprpc_transport_ws_start_server(NULL) 或传入已有 httpd
+ * 端点: ws://<ip>:80/ws；传入非空 httpd 时与调用方共用同一服务器
  */
 
 #include "esprpc_transport.h"
 #include "esprpc.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
+#include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -24,6 +25,7 @@ static const char *TAG = "esprpc_ws";
 /** WebSocket 传输上下文 */
 typedef struct {
     httpd_handle_t server;
+    bool server_owned;  /* true=内部创建需负责 stop，false=外部传入不 stop */
     int sockfd;  /* 当前连接的客户端 fd，-1 表示无连接 */
     httpd_req_t *current_req;  /* handler 内当前请求，用于同步发送（避免 httpd_queue_work 死锁） */
     esprpc_transport_on_recv_fn on_recv;
@@ -164,34 +166,45 @@ esp_err_t esprpc_transport_ws_init(void)
 }
 
 /**
- * @brief 启动 HTTP 服务器及 WebSocket 端点（在 WiFi 获取 IP 后调用）
+ * @brief 启动 WebSocket 端点：httpd_server 为空则内部创建 httpd，非空则使用传入的服务器并仅注册 /ws
  */
-esp_err_t esprpc_transport_ws_start_server(void)
+esp_err_t esprpc_transport_ws_start_server(void *httpd_server)
 {
     if (s_ws_ctx.server) {
-        ESP_LOGW(TAG, "HTTP server already running");
+        ESP_LOGW(TAG, "WebSocket already registered");
         return ESP_OK;
     }
 
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 8;
-    config.lru_purge_enable = true;
+    httpd_handle_t server = (httpd_handle_t)httpd_server;
 
-    esp_err_t ret = httpd_start(&s_ws_ctx.server, &config);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "httpd_start failed: %s", esp_err_to_name(ret));
-        return ret;
+    if (!server) {
+        httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+        config.max_uri_handlers = 8;
+        config.lru_purge_enable = true;
+        esp_err_t ret = httpd_start(&server, &config);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "httpd_start failed: %s", esp_err_to_name(ret));
+            return ret;
+        }
+        s_ws_ctx.server = server;
+        s_ws_ctx.server_owned = true;
+    } else {
+        s_ws_ctx.server = server;
+        s_ws_ctx.server_owned = false;
     }
 
-    ret = httpd_register_uri_handler(s_ws_ctx.server, &ws_uri);
+    esp_err_t ret = httpd_register_uri_handler(s_ws_ctx.server, &ws_uri);
     if (ret != ESP_OK) {
-        httpd_stop(s_ws_ctx.server);
+        if (s_ws_ctx.server_owned) {
+            httpd_stop(s_ws_ctx.server);
+        }
         s_ws_ctx.server = NULL;
-        ESP_LOGE(TAG, "httpd_register_uri_handler failed: %s", esp_err_to_name(ret));
+        s_ws_ctx.server_owned = false;
+        ESP_LOGE(TAG, "httpd_register_uri_handler /ws failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    ESP_LOGI(TAG, "HTTP server started, WebSocket at ws://<ip>:%d/ws", config.server_port);
+    ESP_LOGI(TAG, "WebSocket at /ws (server %s)", s_ws_ctx.server_owned ? "owned" : "external");
     return ESP_OK;
 }
 
@@ -211,8 +224,9 @@ esp_err_t esprpc_transport_ws_init(void)
     return ESP_ERR_NOT_SUPPORTED;
 }
 
-esp_err_t esprpc_transport_ws_start_server(void)
+esp_err_t esprpc_transport_ws_start_server(void *httpd_server)
 {
+    (void)httpd_server;
     return ESP_ERR_NOT_SUPPORTED;
 }
 

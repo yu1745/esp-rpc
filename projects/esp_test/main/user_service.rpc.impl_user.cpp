@@ -1,10 +1,10 @@
 /* 用户实现 - 此文件不会被生成器覆盖，请在此编写业务逻辑 */
-#include "user_service.rpc.h"
+#include "user_service.rpc.gen.hpp"
 #include "esprpc.h"
 #include "esprpc_binary.h"
 #include "esp_log.h"
-#include <string.h>
-#include <stdlib.h>
+#include <cstring>
+#include <cstdlib>
 
 static const char *TAG = "UserService";
 
@@ -45,26 +45,30 @@ static int serialize_user(const User *u, uint8_t *buf, size_t buf_size)
     if (esprpc_bin_write_optional_tag(&wp, wend, u->email.present) != 0) return -1;
     if (u->email.present && esprpc_bin_write_str(&wp, wend, u->email.value) != 0) return -1;
     if (esprpc_bin_write_i32(&wp, wend, u->status) != 0) return -1;
+    /* LIST(string) tags: [4B count][for each: 2B len][bytes] */
+    if (esprpc_bin_write_u32(&wp, wend, (uint32_t)u->tags.len) != 0) return -1;
+    for (size_t i = 0; i < u->tags.len && u->tags.items; i++) {
+        if (esprpc_bin_write_str(&wp, wend, u->tags.items[i] ? u->tags.items[i] : "") != 0) return -1;
+    }
     return (int)(wp - buf);
 }
 
-struct User_stream watch_users_impl(void)
+rpc_stream<User> watch_users_impl(void)
 {
     ESP_LOGI(TAG, "WatchUsers()");
     uint16_t method_id = esprpc_get_stream_method_id();
     if (method_id == ESPRPC_STREAM_METHOD_ID_NONE) {
-        return (struct User_stream){ .ctx = NULL };
+        return (rpc_stream<User>){ nullptr };
     }
     ESP_LOGI(TAG, "WatchUsers: user count %d", s_user_count);
     uint8_t buf[256];
     for (size_t i = 0; i < s_user_count; i++) {
         User u = {
-            .id = s_users[i].id,
-            .name = s_users[i].name,
-            .email = { .present = true, .value = s_users[i].email },
-            .status = s_users[i].status,
-            .tags = { .items = NULL, .len = 0 },
-            .metadata = { .keys = NULL, .values = NULL, .len = 0 },
+            s_users[i].id,
+            s_users[i].name,
+            { true, s_users[i].email },
+            s_users[i].status,
+            { nullptr, 0 },
         };
         int n = serialize_user(&u, buf, sizeof(buf));
         if (n > 0) {
@@ -75,7 +79,7 @@ struct User_stream watch_users_impl(void)
             ESP_LOGI(TAG, "WatchUsers: stream_emit success %d", n);
         }
     }
-    return (struct User_stream){ .ctx = NULL };
+    return (rpc_stream<User>){ .ctx = NULL };
 }
 
 UserResponse get_user_impl(int id)
@@ -84,14 +88,14 @@ UserResponse get_user_impl(int id)
     for (size_t i = 0; i < s_user_count; i++) {
         if (s_users[i].id == id) {
             return (UserResponse){
-                .id = s_users[i].id,
-                .name = s_users[i].name,
-                .email = s_users[i].email,
-                .status = s_users[i].status,
+                s_users[i].id,
+                s_users[i].name,
+                s_users[i].email,
+                s_users[i].status,
             };
         }
     }
-    return (UserResponse){ 0 };
+    return (UserResponse){};
 }
 
 UserResponse create_user_impl(CreateUserRequest request)
@@ -101,7 +105,7 @@ UserResponse create_user_impl(CreateUserRequest request)
              request.email ? request.email : "(null)",
              request.password.present && request.password.value ? request.password.value : "(null)");
     if (s_user_count >= MAX_USERS) {
-        return (UserResponse){ 0 };
+        return (UserResponse){};
     }
     size_t i = s_user_count++;
     s_users[i].id = s_next_id++;
@@ -109,10 +113,10 @@ UserResponse create_user_impl(CreateUserRequest request)
     copy_str(s_users[i].email, MAX_EMAIL, request.email);
     s_users[i].status = ACTIVE;
     return (UserResponse){
-        .id = s_users[i].id,
-        .name = s_users[i].name,
-        .email = s_users[i].email,
-        .status = s_users[i].status,
+        s_users[i].id,
+        s_users[i].name,
+        s_users[i].email,
+        s_users[i].status,
     };
 }
 
@@ -127,14 +131,14 @@ UserResponse update_user_impl(int id, CreateUserRequest request)
             copy_str(s_users[i].name, MAX_NAME, request.name);
             copy_str(s_users[i].email, MAX_EMAIL, request.email);
             return (UserResponse){
-                .id = s_users[i].id,
-                .name = s_users[i].name,
-                .email = s_users[i].email,
-                .status = s_users[i].status,
+                s_users[i].id,
+                s_users[i].name,
+                s_users[i].email,
+                s_users[i].status,
             };
         }
     }
-    return (UserResponse){ 0 };
+    return (UserResponse){};
 }
 
 bool delete_user_impl(int id)
@@ -150,12 +154,25 @@ bool delete_user_impl(int id)
     return false;
 }
 
+/* 用于 ListUsers 返回的静态缓冲区（避免动态分配） */
+static User s_list_buffer[MAX_USERS];
+
 User_list list_users_impl(int_optional page)
 {
     ESP_LOGI(TAG, "ListUsers(page=%s)", page.present ? "present" : "absent");
     if (page.present) {
         ESP_LOGI(TAG, "  page.value=%d", page.value);
     }
-    /* 简单实现：返回空列表，如需可扩展为静态 User 数组 */
-    return (User_list){ .items = NULL, .len = 0 };
+
+    /* 返回当前用户数组的完整列表 */
+    for (size_t i = 0; i < s_user_count; i++) {
+        s_list_buffer[i] = (User){
+            s_users[i].id,
+            s_users[i].name,
+            { true, s_users[i].email },
+            s_users[i].status,
+            { nullptr, 0 },
+        };
+    }
+    return (User_list){ s_list_buffer, s_user_count };
 }

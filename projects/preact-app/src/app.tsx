@@ -2,15 +2,19 @@ import { useState, useRef } from 'preact/hooks';
 import { UserServiceClient } from './generated/rpc_client';
 import { createWebSocketTransport } from './generated/transport-ws';
 import { createBleTransport } from './generated/transport-ble';
+import { createSerialTransport } from './generated/transport-serial';
 import type { EsprpcTransport } from './generated/transport';
 import type { User, CreateUserRequest } from './generated/rpc_types';
 import './app.css';
 
 const WS_URL = 'ws://192.168.4.1/ws'; // ESP32 默认 SoftAP IP
 
-type TransportMode = 'ws' | 'ble';
+type TransportMode = 'ws' | 'ble' | 'serial';
 
 const bleSupported = typeof navigator !== 'undefined' && 'bluetooth' in navigator;
+const serialSupported =
+  typeof navigator !== 'undefined' &&
+  !!(navigator as unknown as { serial?: { requestPort: () => Promise<unknown> } }).serial;
 
 export function App() {
   const [transportMode, setTransportMode] = useState<TransportMode>('ws');
@@ -59,9 +63,28 @@ export function App() {
     }
   };
 
+  const connectSerial = async () => {
+    if (!serialSupported) {
+      setError('Web Serial API 不可用，请使用 Chrome/Edge 并确保 HTTPS 或 localhost');
+      return;
+    }
+    try {
+      setError(null);
+      const transport = createSerialTransport({ baudRate: 115200, prefix: 'DRPC', suffix: '\n' });
+      const client = new UserServiceClient(transport);
+      await transport.connect();
+      transportRef.current = transport;
+      clientRef.current = client;
+      setConnected(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '串口连接失败');
+    }
+  };
+
   const connect = () => {
     if (transportMode === 'ws') connectWs();
-    else connectBle();
+    else if (transportMode === 'ble') connectBle();
+    else connectSerial();
   };
 
   const disconnect = () => {
@@ -118,6 +141,13 @@ export function App() {
           >
             Bluetooth
           </button>
+          <button
+            class={transportMode === 'serial' ? 'active' : ''}
+            onClick={() => !connected && setTransportMode('serial')}
+            disabled={connected}
+          >
+            Serial
+          </button>
         </div>
 
         {transportMode === 'ws' && (
@@ -141,14 +171,36 @@ export function App() {
           <p class="ble-hint">点击连接后，在弹窗中选择 ESPRPC 设备</p>
         )}
 
+        {transportMode === 'serial' && !serialSupported && (
+          <p class="ble-hint">Web Serial 需要 Chrome/Edge，且需 HTTPS 或 localhost</p>
+        )}
+
+        {transportMode === 'serial' && serialSupported && !connected && (
+          <p class="ble-hint">点击连接后，在浏览器弹窗中选择串口设备（如 USB 转串口或 ESP32 串口）</p>
+        )}
+
         {connected && transportMode === 'ble' && bleDeviceName && (
           <p class="connected-label">已连接: {bleDeviceName}</p>
         )}
 
+        {connected && transportMode === 'serial' && (
+          <p class="connected-label">已连接: 串口</p>
+        )}
+
         <div class="button-row">
           {!connected ? (
-            <button onClick={connect} disabled={transportMode === 'ble' && !bleSupported}>
-              {transportMode === 'ws' ? 'Connect' : 'Connect BLE'}
+            <button
+              onClick={connect}
+              disabled={
+                (transportMode === 'ble' && !bleSupported) ||
+                (transportMode === 'serial' && !serialSupported)
+              }
+            >
+              {transportMode === 'ws'
+                ? 'Connect'
+                : transportMode === 'ble'
+                  ? 'Connect BLE'
+                  : 'Connect Serial'}
             </button>
           ) : (
             <button onClick={disconnect}>Disconnect</button>

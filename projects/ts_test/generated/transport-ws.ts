@@ -128,5 +128,5 @@ export function createWebSocketTransport(url: string): EsprpcTransport {
       pending.forEach((h) => { clearTimeout(h.timeoutId); h.reject(new Error('Disconnected')); });
       pending.clear();
     },
-  };
+    };
 }

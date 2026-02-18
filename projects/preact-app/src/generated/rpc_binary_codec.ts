@@ -5,8 +5,7 @@ import type { User, CreateUserRequest, UserResponse } from './rpc_types';
 export function encodeRequest(methodId: number, args: IArguments | unknown[]): Uint8Array {
   const argsOrArray = args.length !== undefined ? Array.from(args as IArguments) : (args as unknown[]);
 
-  if (methodId === 0) return new Uint8Array(0);
-    if (methodId === 1) {
+    if (methodId === 0) {
       const args = Array.from(argsOrArray);
       let off = 0;
       let buf = new ArrayBuffer(256);
@@ -21,7 +20,7 @@ export function encodeRequest(methodId: number, args: IArguments | unknown[]): U
       ensure(4); dv.setInt32(off, args[0] | 0, true); off += 4;
       return new Uint8Array(buf, 0, off);
     }
-    if (methodId === 2) {
+    if (methodId === 1) {
       const args = Array.from(argsOrArray);
       let off = 0;
       let buf = new ArrayBuffer(256);
@@ -48,7 +47,7 @@ export function encodeRequest(methodId: number, args: IArguments | unknown[]): U
       } else { dv.setUint8(off, 0); off += 1; }
       return new Uint8Array(buf, 0, off);
     }
-    if (methodId === 3) {
+    if (methodId === 2) {
       const args = Array.from(argsOrArray);
       let off = 0;
       let buf = new ArrayBuffer(256);
@@ -76,7 +75,7 @@ export function encodeRequest(methodId: number, args: IArguments | unknown[]): U
       } else { dv.setUint8(off, 0); off += 1; }
       return new Uint8Array(buf, 0, off);
     }
-    if (methodId === 4) {
+    if (methodId === 3) {
       const args = Array.from(argsOrArray);
       let off = 0;
       let buf = new ArrayBuffer(256);
@@ -91,7 +90,7 @@ export function encodeRequest(methodId: number, args: IArguments | unknown[]): U
       ensure(4); dv.setInt32(off, args[0] | 0, true); off += 4;
       return new Uint8Array(buf, 0, off);
     }
-    if (methodId === 5) {
+    if (methodId === 4) {
       const args = Array.from(argsOrArray);
       let off = 0;
       let buf = new ArrayBuffer(256);
@@ -109,6 +108,7 @@ export function encodeRequest(methodId: number, args: IArguments | unknown[]): U
       } else { dv.setUint8(off, 0); off += 1; }
       return new Uint8Array(buf, 0, off);
     }
+  if (methodId === 5) return new Uint8Array(0);
   throw new Error(`Unknown methodId: ${methodId}`);
 }
 
@@ -121,9 +121,8 @@ export function decodeResponse<T = unknown>(methodId: number, payload: Uint8Arra
       result.id = dv.getInt32(off, true); off += 4;
       const _lname = dv.getUint16(off, true); off += 2;
       result.name = new TextDecoder().decode(new Uint8Array(payload.buffer, payload.byteOffset + off, _lname)); off += _lname;
-      const _pemail = dv.getUint8(off); off += 1;
-      if (_pemail) { const _lemail = dv.getUint16(off, true); off += 2;
-        result.email = new TextDecoder().decode(new Uint8Array(payload.buffer, payload.byteOffset + off, _lemail)); off += _lemail; }
+      const _lemail = dv.getUint16(off, true); off += 2;
+      result.email = new TextDecoder().decode(new Uint8Array(payload.buffer, payload.byteOffset + off, _lemail)); off += _lemail;
       result.status = dv.getInt32(off, true); off += 4;
       return result;
     }
@@ -154,21 +153,9 @@ export function decodeResponse<T = unknown>(methodId: number, payload: Uint8Arra
     if (methodId === 3) {
       const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
       let off = 0;
-      const result: any = {};
-      result.id = dv.getInt32(off, true); off += 4;
-      const _lname = dv.getUint16(off, true); off += 2;
-      result.name = new TextDecoder().decode(new Uint8Array(payload.buffer, payload.byteOffset + off, _lname)); off += _lname;
-      const _lemail = dv.getUint16(off, true); off += 2;
-      result.email = new TextDecoder().decode(new Uint8Array(payload.buffer, payload.byteOffset + off, _lemail)); off += _lemail;
-      result.status = dv.getInt32(off, true); off += 4;
-      return result;
-    }
-    if (methodId === 4) {
-      const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
-      let off = 0;
       return dv.getUint8(off) !== 0;
     }
-    if (methodId === 5) {
+    if (methodId === 4) {
       const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
       let off = 0;
       const count = dv.getUint32(off, true); off += 4;
@@ -182,9 +169,38 @@ export function decodeResponse<T = unknown>(methodId: number, payload: Uint8Arra
         if (_pemail) { const _lemail = dv.getUint16(off, true); off += 2;
           item.email = new TextDecoder().decode(new Uint8Array(payload.buffer, payload.byteOffset + off, _lemail)); off += _lemail; }
         item.status = dv.getInt32(off, true); off += 4;
+          const _count = dv.getUint32(off, true); off += 4;
+          item.tags = [];
+          for (let i = 0; i < _count; i++) {
+            let _item: any;
+            const _len = dv.getUint16(off, true); off += 2;
+            _item = new TextDecoder().decode(new Uint8Array(dv.buffer, dv.byteOffset + off, _len)); off += _len;
+            item.tags.push(_item);
+          }
         items.push(item);
       }
       return { items, len: items.length };
+    }
+    if (methodId === 5) {
+      const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+      let off = 0;
+      const result: any = {};
+      result.id = dv.getInt32(off, true); off += 4;
+      const _lname = dv.getUint16(off, true); off += 2;
+      result.name = new TextDecoder().decode(new Uint8Array(payload.buffer, payload.byteOffset + off, _lname)); off += _lname;
+      const _pemail = dv.getUint8(off); off += 1;
+      if (_pemail) { const _lemail = dv.getUint16(off, true); off += 2;
+        result.email = new TextDecoder().decode(new Uint8Array(payload.buffer, payload.byteOffset + off, _lemail)); off += _lemail; }
+      result.status = dv.getInt32(off, true); off += 4;
+        const _count = dv.getUint32(off, true); off += 4;
+        result.tags = [];
+        for (let i = 0; i < _count; i++) {
+          let _item: any;
+          const _len = dv.getUint16(off, true); off += 2;
+          _item = new TextDecoder().decode(new Uint8Array(dv.buffer, dv.byteOffset + off, _len)); off += _len;
+          result.tags.push(_item);
+        }
+      return result;
     }
   throw new Error(`Unknown methodId: ${methodId}`);
 }

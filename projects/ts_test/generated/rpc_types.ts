@@ -13,7 +13,6 @@ export interface User {
   email?: string | undefined;
   status: UserStatus;
   tags: string[];
-  metadata: Record<string, string>;
 }
 
 export interface CreateUserRequest {

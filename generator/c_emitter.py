@@ -96,6 +96,66 @@ def _emit_parse_struct_bin(schema: RpcSchema, struct: StructDef) -> str:
                 lines.append(f'    }}')
             else:
                 lines.append(f'    if (esprpc_bin_read_i32(p, end, &out->{f.name}) != 0) return -1;')
+        elif f.type_str.strip().startswith('LIST('):
+            # LIST(T): [4B count][elem0][elem1]...
+            elem_type = base
+            elem_struct = _get_struct(schema, elem_type)
+            if _is_string_type(f.type_str):
+                lines.append(f'    {{')
+                lines.append(f'        uint32_t {f.name}_count = 0;')
+                lines.append(f'        if (esprpc_bin_read_u32(p, end, &{f.name}_count) != 0) return -1;')
+                lines.append(f'        #define {f.name.upper()}_MAX 8')
+                lines.append(f'        static char {f.name}_buf[{f.name.upper()}_MAX][64];')
+                lines.append(f'        static char *{f.name}_ptrs[{f.name.upper()}_MAX];')
+                lines.append(f'        size_t {f.name}_n = ({f.name}_count < {f.name.upper()}_MAX) ? {f.name}_count : {f.name.upper()}_MAX;')
+                lines.append(f'        for (size_t i = 0; i < {f.name}_n; i++) {{')
+                lines.append(f'            if (esprpc_bin_read_str(p, end, {f.name}_buf[i], sizeof({f.name}_buf[i])) != 0) return -1;')
+                lines.append(f'            {f.name}_ptrs[i] = {f.name}_buf[i];')
+                lines.append(f'        }}')
+                lines.append(f'        out->{f.name}.items = {f.name}_ptrs;')
+                lines.append(f'        out->{f.name}.len = {f.name}_n;')
+                lines.append(f'        for (size_t i = {f.name}_n; i < {f.name}_count; i++) {{')
+                lines.append(f'            if (esprpc_bin_read_str(p, end, {f.name}_buf[0], sizeof({f.name}_buf[0])) != 0) return -1;')
+                lines.append(f'        }}')
+                lines.append(f'        #undef {f.name.upper()}_MAX')
+                lines.append(f'    }}')
+            elif elem_struct:
+                lines.append(f'    {{')
+                lines.append(f'        uint32_t {f.name}_count = 0;')
+                lines.append(f'        if (esprpc_bin_read_u32(p, end, &{f.name}_count) != 0) return -1;')
+                lines.append(f'        #define {f.name.upper()}_MAX 8')
+                lines.append(f'        static {elem_struct.name} {f.name}_arr[{f.name.upper()}_MAX];')
+                lines.append(f'        size_t {f.name}_n = ({f.name}_count < {f.name.upper()}_MAX) ? {f.name}_count : {f.name.upper()}_MAX;')
+                lines.append(f'        for (size_t i = 0; i < {f.name}_n; i++) {{')
+                lines.append(f'            if (bin_read_{elem_struct.name}(p, end, &{f.name}_arr[i]) != 0) return -1;')
+                lines.append(f'        }}')
+                lines.append(f'        out->{f.name}.items = {f.name}_arr;')
+                lines.append(f'        out->{f.name}.len = {f.name}_n;')
+                lines.append(f'        for (size_t i = {f.name}_n; i < {f.name}_count; i++) {{')
+                lines.append(f'            {elem_struct.name} _skip;')
+                lines.append(f'            if (bin_read_{elem_struct.name}(p, end, &_skip) != 0) return -1;')
+                lines.append(f'        }}')
+                lines.append(f'        #undef {f.name.upper()}_MAX')
+                lines.append(f'    }}')
+            else:
+                elem_c = _type_str_to_c(elem_type)
+                lines.append(f'    {{')
+                lines.append(f'        uint32_t {f.name}_count = 0;')
+                lines.append(f'        if (esprpc_bin_read_u32(p, end, &{f.name}_count) != 0) return -1;')
+                lines.append(f'        #define {f.name.upper()}_MAX 8')
+                lines.append(f'        static {elem_c} {f.name}_arr[{f.name.upper()}_MAX];')
+                lines.append(f'        size_t {f.name}_n = ({f.name}_count < {f.name.upper()}_MAX) ? {f.name}_count : {f.name.upper()}_MAX;')
+                lines.append(f'        for (size_t i = 0; i < {f.name}_n; i++) {{')
+                lines.append(f'            if (esprpc_bin_read_i32(p, end, (int *)&{f.name}_arr[i]) != 0) return -1;')
+                lines.append(f'        }}')
+                lines.append(f'        out->{f.name}.items = {f.name}_arr;')
+                lines.append(f'        out->{f.name}.len = {f.name}_n;')
+                lines.append(f'        for (size_t i = {f.name}_n; i < {f.name}_count; i++) {{')
+                lines.append(f'            int _skip;')
+                lines.append(f'            if (esprpc_bin_read_i32(p, end, &_skip) != 0) return -1;')
+                lines.append(f'        }}')
+                lines.append(f'        #undef {f.name.upper()}_MAX')
+                lines.append(f'    }}')
         else:
             lines.append(f'    if (esprpc_bin_read_i32(p, end, (int *)&out->{f.name}) != 0) return -1;')
     lines.append(f'    return 0;')
@@ -104,16 +164,41 @@ def _emit_parse_struct_bin(schema: RpcSchema, struct: StructDef) -> str:
 
 
 def _emit_serialize_struct_bin(schema: RpcSchema, struct: StructDef, var_name: str = 'r', skip_complex: bool = False) -> list[str]:
-    """生成结构体二进制序列化代码块，写入到 (*wp, end)。skip_complex=True 时跳过 LIST/MAP 字段"""
+    """生成结构体二进制序列化代码块，写入到 (*wp, end)。skip_complex 仅用于兼容，LIST 已支持"""
     lines = []
     for f in struct.fields:
         if not f.name:
             continue
-        if skip_complex and not _field_is_serializable(f.type_str):
-            continue
         base = _unwrap_type(f.type_str)
         is_opt = f.type_str.strip().startswith('OPTIONAL(')
-        if _is_string_type(f.type_str):
+        if f.type_str.strip().startswith('LIST('):
+            # LIST(T): [4B count][elem0][elem1]...
+            elem_type = base
+            elem_struct = _get_struct(schema, elem_type)
+            if _is_string_type(f.type_str):
+                lines.append(f'    if (esprpc_bin_write_u32(&wp, wend, (uint32_t)({var_name}.{f.name}.len)) != 0) return -1;')
+                lines.append(f'    if ({var_name}.{f.name}.items && {var_name}.{f.name}.len > 0) {{')
+                lines.append(f'        for (size_t j = 0; j < {var_name}.{f.name}.len; j++) {{')
+                lines.append(f'            if (esprpc_bin_write_str(&wp, wend, {var_name}.{f.name}.items[j] ? {var_name}.{f.name}.items[j] : "") != 0) return -1;')
+                lines.append(f'        }}')
+                lines.append(f'    }}')
+            elif elem_struct:
+                lines.append(f'    if (esprpc_bin_write_u32(&wp, wend, (uint32_t)({var_name}.{f.name}.len)) != 0) return -1;')
+                lines.append(f'    if ({var_name}.{f.name}.items && {var_name}.{f.name}.len > 0) {{')
+                lines.append(f'        for (size_t j = 0; j < {var_name}.{f.name}.len; j++) {{')
+                for line in _emit_serialize_struct_bin(schema, elem_struct, f'{var_name}.{f.name}.items[j]', skip_complex=True):
+                    lines.append(f'            {line}')
+                lines.append(f'        }}')
+                lines.append(f'    }}')
+            else:
+                # LIST(primitive)
+                lines.append(f'    if (esprpc_bin_write_u32(&wp, wend, (uint32_t)({var_name}.{f.name}.len)) != 0) return -1;')
+                lines.append(f'    if ({var_name}.{f.name}.items && {var_name}.{f.name}.len > 0) {{')
+                lines.append(f'        for (size_t j = 0; j < {var_name}.{f.name}.len; j++) {{')
+                lines.append(f'            if (esprpc_bin_write_i32(&wp, wend, (int){var_name}.{f.name}.items[j]) != 0) return -1;')
+                lines.append(f'        }}')
+                lines.append(f'    }}')
+        elif _is_string_type(f.type_str):
             if is_opt:
                 lines.append(f'    if (esprpc_bin_write_optional_tag(&wp, wend, {var_name}.{f.name}.present) != 0) return -1;')
                 lines.append(f'    if ({var_name}.{f.name}.present && esprpc_bin_write_str(&wp, wend, {var_name}.{f.name}.value) != 0) return -1;')
@@ -131,10 +216,7 @@ def _emit_serialize_struct_bin(schema: RpcSchema, struct: StructDef, var_name: s
 
 
 def _field_is_serializable(type_str: str) -> bool:
-    """字段是否可简单序列化（跳过 LIST/MAP 等复杂类型）"""
-    t = type_str.strip()
-    if t.startswith('LIST(') or t.startswith('MAP('):
-        return False
+    """字段是否可简单序列化（LIST 已支持，MAP 已移除）"""
     return True
 
 
@@ -158,7 +240,7 @@ def _emit_method_dispatch(schema: RpcSchema, svc: ServiceDef, m: MethodDef, meth
             lines.append(f'        if (esprpc_bin_read_bool((const uint8_t **)&p, end, &{p.name}_val) != 0) return -1;')
             call_args.append(f'{p.name}_val')
         elif is_opt and _c_primitive(base):
-            lines.append(f'        {c_type} {p.name} = {{ .present = false, .value = 0 }};')
+            lines.append(f'        {c_type} {p.name} = {{ false, 0 }};')
             lines.append(f'        {{ bool pr = false; if (esprpc_bin_read_optional_tag((const uint8_t **)&p, end, &pr) != 0) return -1;')
             lines.append(f'          if (pr) {{ int v = 0; if (esprpc_bin_read_i32((const uint8_t **)&p, end, &v) != 0) return -1;')
             lines.append(f'            {p.name}.present = true; {p.name}.value = v; }} }}')
@@ -166,14 +248,14 @@ def _emit_method_dispatch(schema: RpcSchema, svc: ServiceDef, m: MethodDef, meth
         elif _is_struct_param(p.type_str, schema):
             struct = _get_struct(schema, base)
             if struct:
-                lines.append(f'        {c_type} {p.name} = {{ 0 }};')
+                lines.append(f'        {c_type} {p.name} = {{}};')
                 lines.append(f'        if (bin_read_{struct.name}((const uint8_t **)&p, end, &{p.name}) != 0) return -1;')
                 call_args.append(p.name)
             else:
-                lines.append(f'        {c_type} {p.name} = {{ 0 }};')
+                lines.append(f'        {c_type} {p.name} = {{}};')
                 call_args.append(p.name)
         else:
-            lines.append(f'        {c_type} {p.name} = {{ 0 }};')
+            lines.append(f'        {c_type} {p.name} = {{}};')
             call_args.append(p.name)
 
     # 2. 调用服务
@@ -183,7 +265,7 @@ def _emit_method_dispatch(schema: RpcSchema, svc: ServiceDef, m: MethodDef, meth
 
     # 3. 响应序列化（二进制）
     lines.append(f'        *resp_len = 1024;')
-    lines.append(f'        *resp_buf = malloc(*resp_len);')
+    lines.append(f'        *resp_buf = (uint8_t *)malloc(*resp_len);')
     lines.append(f'        if (!*resp_buf) return -1;')
     lines.append(f'        uint8_t *wp = *resp_buf;')
     lines.append(f'        const uint8_t *wend = *resp_buf + *resp_len;')
@@ -235,7 +317,7 @@ def _emit_stream_dispatch(schema: RpcSchema, svc: ServiceDef, m: MethodDef, meth
             lines.append(f'        if (esprpc_bin_read_bool((const uint8_t **)&p, end, &{p.name}_val) != 0) return -1;')
             call_args.append(f'{p.name}_val')
         elif is_opt and _c_primitive(base):
-            lines.append(f'        {c_type} {p.name} = {{ .present = false, .value = 0 }};')
+            lines.append(f'        {c_type} {p.name} = {{ false, 0 }};')
             lines.append(f'        {{ bool pr = false; if (esprpc_bin_read_optional_tag((const uint8_t **)&p, end, &pr) != 0) return -1;')
             lines.append(f'          if (pr) {{ int v = 0; if (esprpc_bin_read_i32((const uint8_t **)&p, end, &v) != 0) return -1;')
             lines.append(f'            {p.name}.present = true; {p.name}.value = v; }} }}')
@@ -243,19 +325,19 @@ def _emit_stream_dispatch(schema: RpcSchema, svc: ServiceDef, m: MethodDef, meth
         elif _is_struct_param(p.type_str, schema):
             struct = _get_struct(schema, base)
             if struct:
-                lines.append(f'        {c_type} {p.name} = {{ 0 }};')
+                lines.append(f'        {c_type} {p.name} = {{}};')
                 lines.append(f'        if (bin_read_{struct.name}((const uint8_t **)&p, end, &{p.name}) != 0) return -1;')
                 call_args.append(p.name)
             else:
-                lines.append(f'        {c_type} {p.name} = {{ 0 }};')
+                lines.append(f'        {c_type} {p.name} = {{}};')
                 call_args.append(p.name)
         else:
-            lines.append(f'        {c_type} {p.name} = {{ 0 }};')
+            lines.append(f'        {c_type} {p.name} = {{}};')
             call_args.append(p.name)
 
     lines.append(f'        esprpc_set_stream_method_id(method_id);')
     args_str = ', '.join(call_args)
-    ret_c = f'struct {m.ret_type}_stream'
+    ret_c = f'rpc_stream<{m.ret_type}>'
     lines.append(f'        {ret_c} r = svc->{m.name}({args_str});')
     lines.append(f'        esprpc_set_stream_method_id(ESPRPC_STREAM_METHOD_ID_NONE);')
     lines.append(f'        (void)r;')
@@ -323,7 +405,7 @@ def _type_str_to_c(type_str: str) -> str:
         return f'{inner}_list'
     if t.startswith('STREAM(') and t.endswith(')'):
         inner = t[7:-1].strip()
-        return f'struct {inner}_stream'
+        return f'rpc_stream<{inner}>'
     return t
 
 
@@ -340,22 +422,22 @@ def _method_to_snake(name: str) -> str:
 def _default_return_expr(ret_type: str, is_stream: bool = False) -> str:
     """根据返回类型生成占位返回值表达式"""
     if is_stream:
-        c_type = f'struct {ret_type}_stream'
-        return f'return ({c_type}){{ .ctx = NULL }};'
+        c_type = f'rpc_stream<{ret_type}>'
+        return f'return ({c_type}){{ nullptr }};'
     c_type = _type_str_to_c(ret_type)
     if c_type == 'bool':
         return 'return false;'
     if c_type.endswith('_list'):
-        return f'return ({c_type}){{ .items = NULL, .len = 0 }};'
-    if c_type.startswith('struct ') and '_stream' in c_type:
-        return f'return ({c_type}){{ .ctx = NULL }};'
-    return f'return ({c_type}){{ 0 }};'
+        return f'return ({c_type}){{ nullptr, 0 }};'
+    if 'rpc_stream<' in c_type:
+        return f'return ({c_type}){{ nullptr }};'
+    return f'return ({c_type}){{}};'
 
 
 def _emit_impl_extern_and_vtable(svc: ServiceDef) -> str:
-    """生成 impl.c：仅 extern 声明 + vtable 组装，不含函数体"""
+    """生成 impl：仅 extern 声明 + vtable 组装，不含函数体"""
     lines = [
-        f'/* {svc.name} - 仅 vtable 组装，实现请在 impl_user.c 中编写 */',
+        f'/* {svc.name} - 仅 vtable 组装，实现请在 impl_user.cpp 中编写 */',
         f'',
     ]
     for m in svc.methods:
@@ -363,7 +445,7 @@ def _emit_impl_extern_and_vtable(svc: ServiceDef) -> str:
             params_str = ', '.join(f'{_type_str_to_c(p.type_str)} {p.name}' for p in m.params)
         else:
             params_str = 'void'
-        ret_c = f'struct {m.ret_type}_stream' if m.is_stream else _type_str_to_c(m.ret_type)
+        ret_c = f'rpc_stream<{m.ret_type}>' if m.is_stream else _type_str_to_c(m.ret_type)
         fn_name = f'{_method_to_snake(m.name)}_impl'
         lines.append(f'extern {ret_c} {fn_name}({params_str});')
     lines.append(f'')
@@ -371,13 +453,13 @@ def _emit_impl_extern_and_vtable(svc: ServiceDef) -> str:
     lines.append(f'{svc.name} {var_name} = {{')
     for m in svc.methods:
         fn_name = f'{_method_to_snake(m.name)}_impl'
-        lines.append(f'    .{m.name} = {fn_name},')
+        lines.append(f'    {fn_name},')
     lines.append(f'}};')
     return '\n'.join(lines)
 
 
 def _emit_service_impl_user_stubs(svc: ServiceDef) -> str:
-    """生成 impl_user.c：用户可编辑的实现占位"""
+    """生成 impl_user.cpp：用户可编辑的实现占位"""
     lines = [
         f'/* {svc.name} 实现 - 此文件由用户编辑，不会被生成器覆盖 */',
         f'',
@@ -387,7 +469,7 @@ def _emit_service_impl_user_stubs(svc: ServiceDef) -> str:
             params_str = ', '.join(f'{_type_str_to_c(p.type_str)} {p.name}' for p in m.params)
         else:
             params_str = 'void'
-        ret_c = f'struct {m.ret_type}_stream' if m.is_stream else _type_str_to_c(m.ret_type)
+        ret_c = f'rpc_stream<{m.ret_type}>' if m.is_stream else _type_str_to_c(m.ret_type)
         fn_name = f'{_method_to_snake(m.name)}_impl'
         lines.append(f'{ret_c} {fn_name}({params_str})')
         lines.append(f'{{')
@@ -402,7 +484,7 @@ def _emit_service_impl_user_stubs(svc: ServiceDef) -> str:
 
 def emit_c_service_impl(schema: RpcSchema, rpc_h_basename: str) -> tuple[str, str]:
     """生成服务实现 impl.c 和 impl.h"""
-    rpc_base = rpc_h_basename.replace('.rpc.h', '')
+    rpc_base = rpc_h_basename.replace('.rpc.hpp', '')
     if not schema.services:
         return '', ''
 
@@ -428,14 +510,15 @@ def emit_c_service_impl(schema: RpcSchema, rpc_h_basename: str) -> tuple[str, st
 
 
 def emit_c_service_impl_user(schema: RpcSchema, rpc_h_basename: str) -> str:
-    """生成 impl_user.c 内容（用户实现占位）"""
-    rpc_base = rpc_h_basename.replace('.rpc.h', '')
+    """生成 impl_user.cpp 内容（用户实现占位）"""
+    rpc_base = rpc_h_basename.replace('.rpc.hpp', '')
     if not schema.services:
         return ''
 
     lines = [
         f'/* 用户实现 - 此文件不会被生成器覆盖，请在此编写业务逻辑 */',
-        f'#include "{rpc_h_basename}"',
+        f'#include "{rpc_h_basename.replace(".rpc.hpp", ".rpc.gen.hpp")}"',
+        f'#include "esprpc_binary.h"',
         f'',
     ]
     for svc in schema.services:
@@ -478,5 +561,60 @@ def emit_c_dispatch(schema: RpcSchema, rpc_h_basename: str) -> str:
             lines.append(_emit_parse_struct_bin(schema, struct))
             lines.append('')
     for svc in schema.services:
+        lines.append(_emit_bin_dispatch(schema, svc))
+    return '\n'.join(lines)
+
+
+def emit_cpp_gen_header(schema: RpcSchema, rpc_h_basename: str) -> str:
+    """生成合并头文件 .rpc.gen.hpp：dispatch 声明 + impl_instance 声明"""
+    rpc_base = rpc_h_basename.replace('.rpc.hpp', '')
+    guard = f'{rpc_base.upper().replace("-", "_")}_RPC_GEN_HPP'
+    lines = [
+        '/* Auto-generated - do not edit */',
+        f'#ifndef {guard}',
+        f'#define {guard}',
+        f'#include "{rpc_h_basename}"',
+        f'#include <cstdint>',
+        f'#include <cstddef>',
+        f'',
+        f'#ifdef __cplusplus',
+        f'extern "C" {{',
+        f'#endif',
+        f'',
+    ]
+    for svc in schema.services:
+        lines.append(f'int {svc.name}_dispatch(uint16_t method_id, const uint8_t *req_buf, size_t req_len,')
+        lines.append(f'                      uint8_t **resp_buf, size_t *resp_len, void *svc_ctx);')
+        lines.append(f'')
+        var_name = f'{_method_to_snake(svc.name)}_impl_instance'
+        lines.append(f'extern {svc.name} {var_name};')
+        lines.append(f'')
+    lines.append(f'#ifdef __cplusplus')
+    lines.append(f'}}')
+    lines.append(f'#endif')
+    lines.append(f'')
+    lines.append(f'#endif')
+    return '\n'.join(lines)
+
+
+def emit_cpp_gen_impl(schema: RpcSchema, rpc_h_basename: str) -> str:
+    """生成合并实现 .rpc.gen.cpp：dispatch + vtable（extern impl 在 impl_user.cpp）"""
+    lines = [
+        '/* Auto-generated - do not edit */',
+        f'#include "{rpc_h_basename.replace(".rpc.hpp", ".rpc.gen.hpp")}"',
+        f'#include "esprpc.h"',
+        f'#include "esprpc_service.h"',
+        f'#include "esprpc_binary.h"',
+        f'#include <cstdlib>',
+        f'#include <cstring>',
+        f'',
+    ]
+    for struct_name in sorted(_collect_struct_params(schema)):
+        struct = _get_struct(schema, struct_name)
+        if struct:
+            lines.append(_emit_parse_struct_bin(schema, struct))
+            lines.append('')
+    for svc in schema.services:
+        lines.append(_emit_impl_extern_and_vtable(svc))
         lines.append(_emit_bin_dispatch(schema, svc))
     return '\n'.join(lines)

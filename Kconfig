@@ -6,11 +6,12 @@ menu "ESP RPC Configuration"
         help
             客户端等待 RPC 响应的超时时间。超时后删除回调并抛出超时异常。可被 call() 的 options.timeout 覆盖。
 
-    config ESPRPC_TS_STUB_PATH
+    config ESPRPC_TS_STUB_OUTPUT_DIR
         string "TS stub output path"
-        default "../ts/generated"
+        default ""
         help
-            Path for generated TypeScript stub files (relative to project root).
+            Path for generated TypeScript stub files (e.g. project-relative or absolute).
+            Empty = do not generate TypeScript stubs (C++ code only).
 
     config ESPRPC_ENABLE_BLE
         bool "Enable BLE transport"
@@ -25,5 +26,37 @@ menu "ESP RPC Configuration"
         depends on HTTPD_WS_SUPPORT
         help
             Enable WebSocket transport for RPC.
+
+    config ESPRPC_ENABLE_SERIAL
+        bool "Enable Serial (UART) transport"
+        default n
+        help
+            Enable serial transport for RPC. Serial port is always owned by external code:
+            call esprpc_serial_set_tx_cb() to register send; feed received RPC frames
+            via esprpc_serial_feed_packet() or esprpc_serial_feed_raw_packet().
+
+    config ESPRPC_SERIAL_PAYLOAD_MAX
+        int "Serial max payload size (bytes)"
+        default 2048
+        depends on ESPRPC_ENABLE_SERIAL
+        help
+            Maximum RPC frame payload length over serial.
+
+    config ESPRPC_SERIAL_PREFIX
+        string "Optional packet prefix (literal or \\xNN)"
+        default ""
+        depends on ESPRPC_ENABLE_SERIAL
+        help
+            Optional prefix before each RPC frame. Empty = no prefix. Max 16 bytes.
+            Literal: type characters as bytes (e.g. ">>" or "RPC").
+            Hex: use \\xNN (e.g. "\\xAA\\x55"). Mix allowed (e.g. "RPC\\x00").
+
+    config ESPRPC_SERIAL_SUFFIX
+        string "Optional packet suffix (literal or \\xNN)"
+        default ""
+        depends on ESPRPC_ENABLE_SERIAL
+        help
+            Optional suffix after each RPC frame. Empty = no suffix. Max 16 bytes.
+            Same format as prefix: literal characters and/or \\xNN.
 
 endmenu

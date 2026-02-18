@@ -6,7 +6,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "gen": "python ../generator/main.py -o generated ../projects/esp_test/main/user_service.rpc.h"
+    "gen": "python ../generator/main.py -o generated ../projects/esp_test/main/user_service.rpc.hpp"
   },
   "devDependencies": {
     "typescript": "^5.0.0"

@@ -1,5 +1,5 @@
 """
-RPC 宏解析器 - 解析 .rpc.h 文件中的 RPC_SERVICE, RPC_METHOD, RPC_STRUCT, RPC_ENUM 等
+RPC 宏解析器 - 解析 .rpc.hpp 文件中的 RPC_SERVICE, RPC_METHOD, RPC_STRUCT, RPC_ENUM 等
 """
 
 import re
@@ -110,7 +110,7 @@ def _parse_struct(content: str) -> Optional[StructDef]:
         line = line.strip().rstrip(';')
         if not line:
             continue
-        # 类型可能含括号如 OPTIONAL(string), MAP(string, string)，最后一词为字段名
+        # 类型可能含括号如 OPTIONAL(string), LIST(string)，最后一词为字段名
         mf = re.match(r'^(.+?)\s+(\w+)\s*$', line)
         if mf:
             fields.append(StructField(type_str=mf.group(1).strip(), name=mf.group(2)))
@@ -135,50 +135,53 @@ def _parse_method_params(params_str: str) -> list[MethodParam]:
 
 
 def _parse_service(content: str) -> Optional[ServiceDef]:
-    """解析 RPC_SERVICE(name) ... RPC_SERVICE_END(name)"""
+    """解析 RPC_SERVICE(name) ... RPC_SERVICE_END(name)，方法顺序与 .hpp 声明一致"""
     m = re.search(r'RPC_SERVICE\s*\(\s*(\w+)\s*\)\s*(.+?)RPC_SERVICE_END\s*\(\s*\w+\s*\)', content, re.DOTALL)
     if not m:
         return None
     name = m.group(1)
     body = m.group(2).strip()
-    methods = []
+    # 收集 (start_pos, MethodDef)，最后按 start_pos 排序以保持与 struct 成员顺序一致
+    ordered: list[tuple[int, MethodDef]] = []
 
     # RPC_METHOD(name, STREAM(Type), params)
     for mth in re.finditer(r'RPC_METHOD\s*\(\s*(\w+)\s*,\s*STREAM\s*\(\s*(\w+)\s*\)\s*,\s*(.*?)\s*\)', body, re.DOTALL):
-        methods.append(MethodDef(
+        ordered.append((mth.start(), MethodDef(
             name=mth.group(1),
             ret_type=mth.group(2),
             params=_parse_method_params(mth.group(3)),
             is_stream=True
-        ))
+        )))
 
     # RPC_METHOD(name, ret_type, params) - 非 STREAM
     for mth in re.finditer(r'RPC_METHOD\s*\(\s*(\w+)\s*,\s*(\w+)\s*,\s*(.*?)\s*\)', body, re.DOTALL):
         if mth.group(2) == 'STREAM':
             continue  # 已由上面处理
-        methods.append(MethodDef(
+        ordered.append((mth.start(), MethodDef(
             name=mth.group(1),
             ret_type=mth.group(2),
             params=_parse_method_params(mth.group(3)),
             is_stream=False
-        ))
+        )))
 
     # RPC_METHOD_EX(name, ret_type, params, "options")
     for mth in re.finditer(r'RPC_METHOD_EX\s*\(\s*(\w+)\s*,\s*(\S+)\s*,\s*(.+?)\s*,\s*"([^"]*)"\s*\)', body, re.DOTALL):
         params_str = mth.group(3).strip()
-        methods.append(MethodDef(
+        ordered.append((mth.start(), MethodDef(
             name=mth.group(1),
             ret_type=mth.group(2),
             params=_parse_method_params(params_str),
             options=mth.group(4),
             is_stream=False
-        ))
+        )))
 
+    ordered.sort(key=lambda x: x[0])
+    methods = [defn for _, defn in ordered]
     return ServiceDef(name=name, methods=methods)
 
 
 def parse_file(path: str) -> RpcSchema:
-    """解析 .rpc.h 文件，返回 RpcSchema"""
+    """解析 .rpc.hpp 文件，返回 RpcSchema"""
     with open(path, 'r', encoding='utf-8') as f:
         content = f.read()
 
@@ -209,7 +212,7 @@ def parse_file(path: str) -> RpcSchema:
 def parse_content(content: str) -> RpcSchema:
     """解析字符串内容"""
     import tempfile
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rpc.h', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.rpc.hpp', delete=False) as f:
         f.write(content)
         f.flush()
         try:

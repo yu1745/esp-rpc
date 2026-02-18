@@ -1,12 +1,12 @@
 /**
- * @file user_service.rpc.h
+ * @file user_service.rpc.hpp
  * @brief UserService RPC 定义（与 example 同步）
  */
 
-#ifndef USER_SERVICE_RPC_H
-#define USER_SERVICE_RPC_H
+#ifndef USER_SERVICE_RPC_HPP
+#define USER_SERVICE_RPC_HPP
 
-#include "rpc_macros.h"
+#include "rpc_macros.hpp"
 
 RPC_ENUM(UserStatus, ACTIVE = 1, INACTIVE = 2, DELETED = 3)
 
@@ -16,16 +16,9 @@ RPC_STRUCT(User,
     OPTIONAL(string) email;
     UserStatus status;
     LIST(string) tags;
-    MAP(string, string) metadata;
 )
 
-/* LIST(User) 展开为 User_list */
-typedef struct { User *items; size_t len; } User_list;
-
-/* STREAM(User) 展开为 struct User_stream - 流式句柄 */
-struct User_stream {
-    void *ctx;  /* 流上下文，供 esprpc_stream_emit 等使用 */
-};
+RPC_LIST_TYPEDEF(User)
 
 RPC_STRUCT(CreateUserRequest,
     REQUIRED(string) name;
@@ -49,4 +42,4 @@ RPC_SERVICE(UserService)
     RPC_METHOD(WatchUsers, STREAM(User), void)
 RPC_SERVICE_END(UserService)
 
-#endif /* USER_SERVICE_RPC_H */
+#endif /* USER_SERVICE_RPC_HPP */
