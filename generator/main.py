@@ -14,7 +14,7 @@ _gen_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _gen_dir)
 from parser import parse_file, RpcSchema  # noqa: E402
 from ts_emitter import emit_all  # noqa: E402
-from ts_binary_emitter import emit_binary_codec, emit_transport_ws_binary  # noqa: E402
+from ts_binary_emitter import emit_binary_codec, emit_transport_ws_binary, emit_transport_ble_binary  # noqa: E402
 from c_emitter import emit_c_dispatch, emit_dispatch_header, emit_c_service_impl, emit_c_service_impl_user  # noqa: E402
 
 
@@ -108,6 +108,13 @@ def main():
     with open(transport_ws_path, 'w', encoding='utf-8') as f:
         f.write(transport_ws_content)
     print(f'Generated {transport_ws_path}')
+
+    transport_ble_content = emit_transport_ble_binary(merged, codec_path='./rpc_binary_codec',
+                                                      default_timeout_ms=args.timeout)
+    transport_ble_path = os.path.join(output_dir, 'transport-ble.ts')
+    with open(transport_ble_path, 'w', encoding='utf-8') as f:
+        f.write(transport_ble_content)
+    print(f'Generated {transport_ble_path}')
 
     # 为每个 .rpc.h 生成 C dispatch 及声明头文件（输出到同目录）
     for rpc_h_path, schema in schemas:

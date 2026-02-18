@@ -26,8 +26,8 @@
 static const char *TAG = "main";
 static const char *TAG_WIFI = "main";
 
-/* WebSocket 接收回调：将数据交给 esprpc 处理（二进制帧） */
-static void ws_recv_to_rpc(const uint8_t *data, size_t len, void *user_ctx)
+/* 传输层接收回调：将数据交给 esprpc 处理（二进制帧） */
+static void transport_recv_to_rpc(const uint8_t *data, size_t len, void *user_ctx)
 {
     (void)user_ctx;
     esprpc_handle_request(data, len);
@@ -91,15 +91,29 @@ void app_main(void)
     esprpc_transport_t *ws = esprpc_transport_ws_get();
     if (ws) {
         esprpc_transport_add(ws);
-        ws->start(ws->ctx, ws_recv_to_rpc, NULL);
+        ws->start(ws->ctx, transport_recv_to_rpc, NULL);
     }
     /* HTTP 服务器在 WiFi 获取 IP 后启动（见 on_wifi_ip_event） */
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
                                                &on_wifi_event, NULL));
 #endif
 
+#if CONFIG_ESPRPC_ENABLE_BLE
+    /* BLE 传输：初始化、注册 */
+    esprpc_transport_ble_init();
+    esprpc_transport_t *ble = esprpc_transport_ble_get();
+    if (ble) {
+        esprpc_transport_add(ble);
+        ble->start(ble->ctx, transport_recv_to_rpc, NULL);
+    }
+#endif
+
     /* 注册 UserService（实现由 generator 生成占位） */
     esprpc_register_service_ex("UserService", &user_service_impl_instance, UserService_dispatch);
 
-    ESP_LOGI(TAG, "RPC ready - WebSocket at ws://<ip>:80/ws when WiFi connected");
+    ESP_LOGI(TAG, "RPC ready - WebSocket at ws://<ip>:80/ws when WiFi connected"
+#if CONFIG_ESPRPC_ENABLE_BLE
+             ", BLE advertising"
+#endif
+             );
 }

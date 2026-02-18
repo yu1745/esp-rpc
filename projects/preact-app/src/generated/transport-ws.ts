@@ -31,7 +31,7 @@ export function createWebSocketTransport(url: string): EsprpcTransport {
         }
         const invokeId = invokeIdCounter++;
         if (invokeIdCounter > 0xfffe) invokeIdCounter = 1;
-        const timeoutMs = options?.timeout ?? 10000;
+        const timeoutMs = options?.timeout ?? 2000;
         const timeoutId = setTimeout(() => {
           const h = pending.get(invokeId);
           if (h) {
@@ -128,5 +128,5 @@ export function createWebSocketTransport(url: string): EsprpcTransport {
       pending.forEach((h) => { clearTimeout(h.timeoutId); h.reject(new Error('Disconnected')); });
       pending.clear();
     },
-  };
+    };
 }

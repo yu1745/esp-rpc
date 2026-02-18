@@ -65,6 +65,18 @@ esp_err_t esprpc_transport_ws_start_server(void);
  */
 esprpc_transport_t *esprpc_transport_ws_get(void);
 
+/* ---------- BLE 传输 ---------- */
+
+/**
+ * @brief 初始化 BLE 传输（创建传输实例，需配合 esprpc_transport_add 使用）
+ */
+esp_err_t esprpc_transport_ble_init(void);
+
+/**
+ * @brief 获取 BLE 传输实例
+ */
+esprpc_transport_t *esprpc_transport_ble_get(void);
+
 #ifdef __cplusplus
 }
 #endif

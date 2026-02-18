@@ -12,6 +12,7 @@ export class UserServiceClient {
   WatchUsers(): { subscribe(cb: (v: User) => void): () => void } {
     return { subscribe: (cb) => {
       this.#transport.subscribe<User>(0, cb);
+      this.#transport.sendStreamRequest(0, []);
       return () => this.#transport.unsubscribe(0);
     } };
   }
@@ -28,8 +29,8 @@ export class UserServiceClient {
     return this.#transport.call<UserResponse>(3, arguments);
   }
 
-  async DeleteUser(_id: number): Promise<number> {
-    return this.#transport.call<number>(4, arguments);
+  async DeleteUser(_id: number): Promise<boolean> {
+    return this.#transport.call<boolean>(4, arguments);
   }
 
   async ListUsers(_page: number | undefined): Promise<User[]> {

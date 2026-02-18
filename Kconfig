@@ -15,9 +15,9 @@ menu "ESP RPC Configuration"
     config ESPRPC_ENABLE_BLE
         bool "Enable BLE transport"
         default y
-        depends on BT_ENABLED
+        depends on BT_ENABLED && BT_NIMBLE_ENABLED
         help
-            Enable Bluetooth Low Energy transport for RPC.
+            Enable Bluetooth Low Energy transport for RPC (NimBLE GATT server).
 
     config ESPRPC_ENABLE_WS
         bool "Enable WebSocket transport"

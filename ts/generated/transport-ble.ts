@@ -1,37 +1,40 @@
 /**
- * WebSocket 传输实现（二进制协议）
+ * BLE 传输实现（Web Bluetooth API，二进制协议）
+ *
+ * 服务 UUID: 0000E530-1212-EFDE-1523-785FEABCD123
+ * TX 特征 (写): 0000E531-...  RX 特征 (通知): 0000E532-...
  */
 
 import type { EsprpcTransport } from './transport';
 import { encodeRequest, decodeResponse } from './rpc_binary_codec';
 
-function closeCodeMessage(code: number): string {
-  const map: Record<number, string> = {
-    1000: '正常关闭',
-    1001: '端点离开',
-    1002: '协议错误',
-    1006: '异常关闭',
-    1011: '服务器内部错误',
-  };
-  return map[code] ?? `未知错误`;
-}
+const ESPRPC_SERVICE_UUID = '0000e530-1212-efde-1523-785feabcd123';
+const ESPRPC_CHR_TX_UUID = '0000e531-1212-efde-1523-785feabcd123';
+const ESPRPC_CHR_RX_UUID = '0000e532-1212-efde-1523-785feabcd123';
 
-export function createWebSocketTransport(url: string): EsprpcTransport {
-  let ws: WebSocket | null = null;
+export function createBleTransport(): EsprpcTransport {
+  let device: BluetoothDevice | null = null;
+  let txChar: BluetoothRemoteGATTCharacteristic | null = null;
+  let rxChar: BluetoothRemoteGATTCharacteristic | null = null;
   let invokeIdCounter = 1;
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; timeoutId: ReturnType<typeof setTimeout> }>();
   const streamSubs = new Map<number, (data: unknown) => void>();
 
+  function sendFrame(frame: Uint8Array): void {
+    if (!txChar) return;
+    txChar.writeValueWithoutResponse(frame);
+  }
+
   return {
     async call<T = unknown>(methodId: number, args: IArguments, options?: { timeout?: number }): Promise<T> {
       return new Promise((resolve, reject) => {
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
+        if (!txChar) {
           reject(new Error('Not connected'));
           return;
         }
         const invokeId = invokeIdCounter++;
         if (invokeIdCounter > 0xfffe) invokeIdCounter = 1;
-        const timeoutMs = options?.timeout ?? 10000;
+        const timeoutMs = options?.timeout ?? 2000;
         const timeoutId = setTimeout(() => {
           const h = pending.get(invokeId);
           if (h) {
@@ -52,11 +55,11 @@ export function createWebSocketTransport(url: string): EsprpcTransport {
         frame[3] = payload.length & 0xff;
         frame[4] = (payload.length >> 8) & 0xff;
         frame.set(payload, 5);
-        ws.send(frame);
+        sendFrame(frame);
       });
     },
     sendStreamRequest(methodId: number, args?: IArguments | unknown[]): void {
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!txChar) return;
       const payload = encodeRequest(methodId, args ?? { length: 0 } as IArguments);
       const frame = new Uint8Array(5 + payload.length);
       frame[0] = methodId;
@@ -65,7 +68,7 @@ export function createWebSocketTransport(url: string): EsprpcTransport {
       frame[3] = payload.length & 0xff;
       frame[4] = (payload.length >> 8) & 0xff;
       frame.set(payload, 5);
-      ws.send(frame);
+      sendFrame(frame);
     },
     subscribe<T = unknown>(methodId: number, cb: (data: T) => void): void {
       streamSubs.set(methodId, cb as (data: unknown) => void);
@@ -74,36 +77,24 @@ export function createWebSocketTransport(url: string): EsprpcTransport {
       streamSubs.delete(methodId);
     },
     async connect(): Promise<void> {
-      ws = new WebSocket(url);
-      await new Promise<void>((resolve, reject) => {
-        if (!ws) return reject(new Error('No socket'));
-        let settled = false;
-        const settle = (err?: Error) => {
-          if (settled) return;
-          settled = true;
-          if (err) reject(err);
-          else resolve();
-        };
-        ws.onopen = () => settle();
-        let errorFallback: ReturnType<typeof setTimeout> | null = null;
-        ws.onerror = () => {
-          if (!settled) {
-            errorFallback = setTimeout(() => {
-              if (!settled) settle(new Error(`连接失败: ${url}`));
-            }, 100);
-          }
-        };
-        ws.onclose = (ev) => {
-          if (errorFallback) clearTimeout(errorFallback);
-          if (settled) return;
-          settle(new Error(`连接失败: ${ev.reason || closeCodeMessage(ev.code)} (code ${ev.code})`));
-        };
+      if (typeof navigator === 'undefined' || !navigator.bluetooth) {
+        throw new Error('Web Bluetooth API 不可用，请使用 HTTPS 或 Chrome');
+      }
+      device = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [ESPRPC_SERVICE_UUID] }],
+        optionalServices: [ESPRPC_SERVICE_UUID],
       });
-      ws.binaryType = 'arraybuffer';
-      ws.onmessage = (ev) => {
+      const server = await device.gatt!.connect();
+      const service = await server.getPrimaryService(ESPRPC_SERVICE_UUID);
+      txChar = await service.getCharacteristic(ESPRPC_CHR_TX_UUID);
+      rxChar = await service.getCharacteristic(ESPRPC_CHR_RX_UUID);
+      await rxChar.startNotifications();
+      rxChar.addEventListener('characteristicvaluechanged', (ev: Event) => {
+        const target = ev.target as BluetoothRemoteGATTCharacteristic;
+        const value = target?.value;
+        if (!value || value.byteLength < 5) return;
         try {
-          const data = new Uint8Array(ev.data as ArrayBuffer);
-          if (data.length < 5) return;
+          const data = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
           const methodId = data[0];
           const invokeId = data[1] | (data[2] << 8);
           const payloadLen = data[3] | (data[4] << 8);
@@ -121,10 +112,15 @@ export function createWebSocketTransport(url: string): EsprpcTransport {
             if (cb) cb(result);
           }
         } catch (_) {}
-      };
+      });
     },
     disconnect(): void {
-      if (ws) { ws.close(); ws = null; }
+      if (device?.gatt?.connected) {
+        device.gatt.disconnect();
+      }
+      device = null;
+      txChar = null;
+      rxChar = null;
       pending.forEach((h) => { clearTimeout(h.timeoutId); h.reject(new Error('Disconnected')); });
       pending.clear();
     },

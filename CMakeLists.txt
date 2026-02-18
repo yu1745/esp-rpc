@@ -2,7 +2,7 @@
 idf_component_register(
     SRCS "src/esprpc.c" "src/esprpc_binary.c" "src/transport_ble.c" "src/transport_http_ws.c"
     INCLUDE_DIRS "include" "."
-    REQUIRES esp_timer esp_http_server
+    REQUIRES esp_timer esp_http_server bt
 )
 
 # TS stub 输出目录，可由项目覆盖

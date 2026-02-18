@@ -10,5 +10,5 @@ endif()
 idf_component_register(
     SRCS "main.c" "user_service.rpc.c" "user_service.rpc.impl.c" "user_service.rpc.impl_user.c" "wifi_sta.c"
     INCLUDE_DIRS "."
-    REQUIRES esprpc nvs_flash esp_netif esp_event esp_wifi esp_http_server
+    REQUIRES esp-rpc nvs_flash esp_netif esp_event esp_wifi esp_http_server
 )
