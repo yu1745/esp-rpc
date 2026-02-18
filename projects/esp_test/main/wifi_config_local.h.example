@@ -1,0 +1,12 @@
+/**
+ * @file wifi_config_local.h.example
+ * @brief WiFi 本地配置模板 - 复制为 wifi_config_local.h 并填入你的 SSID/密码
+ * @note wifi_config_local.h 已加入 .gitignore，不会提交到 GitHub
+ */
+#ifndef WIFI_CONFIG_LOCAL_H
+#define WIFI_CONFIG_LOCAL_H
+
+#define WIFI_SSID      "YOUR_SSID"
+#define WIFI_PASSWORD  "YOUR_PASSWORD"
+
+#endif /* WIFI_CONFIG_LOCAL_H */

@@ -1,0 +1,14 @@
+{
+  "name": "esprpc-ts",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "gen": "python ../generator/main.py -o generated ../projects/esp_test/main/user_service.rpc.h"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

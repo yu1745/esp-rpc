@@ -1,0 +1,3 @@
+version: "0.1.0"
+description: "RPC framework for H5/TypeScript <-> ESP32, supports BLE and WebSocket transport"
+dependencies: {}

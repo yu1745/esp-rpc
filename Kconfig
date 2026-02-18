@@ -1,0 +1,29 @@
+menu "ESP RPC Configuration"
+
+    config ESPRPC_RPC_CALL_TIMEOUT_MS
+        int "RPC 方法调用全局超时时间 (ms)"
+        default 2000
+        help
+            客户端等待 RPC 响应的超时时间。超时后删除回调并抛出超时异常。可被 call() 的 options.timeout 覆盖。
+
+    config ESPRPC_TS_STUB_PATH
+        string "TS stub output path"
+        default "../ts/generated"
+        help
+            Path for generated TypeScript stub files (relative to project root).
+
+    config ESPRPC_ENABLE_BLE
+        bool "Enable BLE transport"
+        default y
+        depends on BT_ENABLED
+        help
+            Enable Bluetooth Low Energy transport for RPC.
+
+    config ESPRPC_ENABLE_WS
+        bool "Enable WebSocket transport"
+        default y
+        depends on HTTPD_WS_SUPPORT
+        help
+            Enable WebSocket transport for RPC.
+
+endmenu
