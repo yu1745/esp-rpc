@@ -56,10 +56,11 @@ void esprpc_transport_remove(esprpc_transport_t *transport);
 esp_err_t esprpc_transport_ws_init(void);
 
 /**
- * @brief 启动 WebSocket 端点 /ws（在 WiFi 获 IP 后调用）
- * @param httpd_server 可空：NULL 时内部创建并持有 httpd；非 NULL 时使用传入的 httpd_handle_t，仅注册 /ws，由调用方管理服务器生命周期
+ * @brief 启动 WebSocket 端点（在 WiFi 获 IP 后调用）
+ * @param httpd_server 可空：NULL 时内部创建并持有 httpd；非 NULL 时使用传入的 httpd_handle_t，由调用方管理服务器生命周期
+ * @param uri_path WebSocket URI 路径，如 "/rpc" 或 "/ws"，NULL 则使用默认路径 "/rpc"
  */
-esp_err_t esprpc_transport_ws_start_server(void *httpd_server);
+esp_err_t esprpc_transport_ws_start_server(void *httpd_server, const char *uri_path);
 
 /**
  * @brief 获取 WebSocket 传输实例

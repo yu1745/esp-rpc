@@ -261,6 +261,15 @@ def _emit_method_dispatch(schema: RpcSchema, svc: ServiceDef, m: MethodDef, meth
     # 2. 调用服务
     args_str = ', '.join(call_args)
     ret_c = _type_str_to_c(m.ret_type)
+
+    # 处理 void 返回类型
+    if m.ret_type == 'void' or m.ret_type == 'VOID':
+        lines.append(f'        svc->{m.name}({args_str});')
+        lines.append(f'        *resp_buf = NULL;')
+        lines.append(f'        *resp_len = 0;')
+        lines.append(f'        return 0;')
+        return lines
+
     lines.append(f'        {ret_c} r = svc->{m.name}({args_str});')
 
     # 3. 响应序列化（二进制）
@@ -353,14 +362,14 @@ def _emit_bin_dispatch(schema: RpcSchema, svc: ServiceDef) -> str:
         f'int {svc.name}_dispatch(uint16_t method_id, const uint8_t *req_buf, size_t req_len,',
         f'                      uint8_t **resp_buf, size_t *resp_len, void *svc_ctx) {{',
         f'    {svc.name} *svc = ({svc.name} *)svc_ctx;',
-        f'    uint8_t mth = method_id & 0x0F;',
+        f'    uint8_t mth = method_id & 0x1F;',
         f'',
     ]
 
     for i, m in enumerate(svc.methods):
         if m.is_stream:
             lines.append(f'    if (mth == {i}) {{')
-            lines.extend(_emit_stream_dispatch(schema, svc, m, i, (0 << 4) | i))
+            lines.extend(_emit_stream_dispatch(schema, svc, m, i, (0 << 5) | i))
             lines.append(f'    }}')
             lines.append(f'')
         else:
@@ -421,6 +430,8 @@ def _method_to_snake(name: str) -> str:
 
 def _default_return_expr(ret_type: str, is_stream: bool = False) -> str:
     """根据返回类型生成占位返回值表达式"""
+    if ret_type == 'void' or ret_type == 'VOID':
+        return 'return;'
     if is_stream:
         c_type = f'rpc_stream<{ret_type}>'
         return f'return ({c_type}){{ nullptr }};'

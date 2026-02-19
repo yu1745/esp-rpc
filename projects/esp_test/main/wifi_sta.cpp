@@ -49,13 +49,13 @@ static void start_own_httpd_and_ws(void) {
     s_httpd = nullptr;
     return;
   }
-  esp_err_t ret = esprpc_transport_ws_start_server(s_httpd);
+  esp_err_t ret = esprpc_transport_ws_start_server(s_httpd, NULL);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "esprpc_transport_ws_start_server failed: %s", esp_err_to_name(ret));
     httpd_stop(s_httpd);
     s_httpd = nullptr;
   } else {
-    ESP_LOGI(TAG, "HTTP server (own): /health + /ws");
+    ESP_LOGI(TAG, "HTTP server (own): /health + /rpc");
   }
 }
 
@@ -134,7 +134,7 @@ void on_wifi_event(void *arg, esp_event_base_t event_base,
           start_own_httpd_and_ws();
         } else {
           //使用esp-rpc自动创建的httpd
-          esp_err_t ret = esprpc_transport_ws_start_server(NULL);
+          esp_err_t ret = esprpc_transport_ws_start_server(NULL, NULL);
           if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to start WebSocket server: %s", esp_err_to_name(ret));
           }

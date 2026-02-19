@@ -32,6 +32,8 @@ def c_type_to_ts(c_type: str) -> str:
         return 'boolean'
     if t == 'string':
         return 'string'
+    if t in ('void', 'VOID'):
+        return 'void'
     if t.startswith('OPTIONAL('):
         inner = t[9:-1].strip()
         return f'{c_type_to_ts(inner)} | undefined'
@@ -75,6 +77,8 @@ def emit_struct(s: StructDef) -> str:
 def emit_method_ret_type(m: MethodDef) -> str:
     if m.is_stream:
         return f'{{ subscribe(cb: (v: {m.ret_type}) => void): () => void }}'
+    if m.ret_type in ('void', 'VOID'):
+        return 'void'  # void 返回类型是即发即忘，不返回 Promise
     return f'Promise<{c_type_to_ts(m.ret_type)}>'
 
 
@@ -118,10 +122,16 @@ def emit_service(svc: ServiceDef, transport_var: str = 'transport', include_impo
             lines.append(f'  }}')
         else:
             params = emit_method_params(m)
-            opts = ', { timeout: 5000 }' if m.options and 'timeout' in str(m.options) else ''
-            lines.append(f'  async {m.name}({params}): {emit_method_ret_type(m)} {{')
-            lines.append(f'    return this.#{transport_var}.call<{ret_ts}>({method_id}, arguments{opts});')
-            lines.append(f'  }}')
+            if m.ret_type in ('void', 'VOID'):
+                # void 返回类型：即发即忘，不等待响应
+                lines.append(f'  {m.name}({params}): {emit_method_ret_type(m)} {{')
+                lines.append(f'    this.#{transport_var}.sendStreamRequest({method_id}, arguments);')
+                lines.append(f'  }}')
+            else:
+                opts = ', { timeout: 5000 }' if m.options and 'timeout' in str(m.options) else ''
+                lines.append(f'  async {m.name}({params}): {emit_method_ret_type(m)} {{')
+                lines.append(f'    return this.#{transport_var}.call<{ret_ts}>({method_id}, arguments{opts});')
+                lines.append(f'  }}')
         lines.append('')
 
     lines.append('}')

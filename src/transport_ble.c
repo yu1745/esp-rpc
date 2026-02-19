@@ -207,6 +207,17 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
         ctx->conn_handle = BLE_HS_CONN_HANDLE_NONE;
         ctx->connected = false;
         ESP_LOGI(TAG, "BLE disconnected");
+        /* 断开后重新开始广播，便于再次连接 */
+        {
+            struct ble_gap_adv_params adv_params = {
+                .conn_mode = BLE_GAP_CONN_MODE_UND,
+                .disc_mode = BLE_GAP_DISC_MODE_GEN,
+                .itvl_min = 0x20,
+                .itvl_max = 0x40,
+            };
+            ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER,
+                              &adv_params, ble_gap_event, NULL);
+        }
         break;
     case BLE_GAP_EVENT_ADV_COMPLETE:
         struct ble_gap_adv_params adv_params = {

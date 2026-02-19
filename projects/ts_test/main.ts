@@ -2,13 +2,13 @@
 /**
  * 纯 TypeScript RPC 测试（Node.js + tsx，无浏览器）
  * 用法: pnpm start [ws_url]
- * 默认: ws://192.168.4.1/ws (ESP32 SoftAP)
+ * 默认: ws://192.168.4.1/rpc (ESP32 SoftAP)
  */
 
 import { UserServiceClient } from './generated/rpc_client.js';
 import { createWebSocketTransport } from './generated/transport-ws.js';
 
-const WS_URL = process.argv[2] ?? process.env.ESPRPC_WS_URL ?? 'ws://192.168.4.1/ws';
+const WS_URL = process.argv[2] ?? process.env.ESPRPC_WS_URL ?? 'ws://192.168.4.1/rpc';
 
 async function main() {
   console.log('ESP-RPC 测试 (Node.js)');

@@ -1,0 +1,15 @@
+{
+  "name": "ts_test",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "gen": "cd ../.. && python generator/main.py -o projects/ts_test/generated projects/esp_test/main/user_service.rpc.hpp",
+    "start": "tsx main.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3"
+  }
+}

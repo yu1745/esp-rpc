@@ -44,6 +44,7 @@ struct rpc_stream {
 
 #define OPTIONAL(type) rpc_optional<type>
 #define REQUIRED(type) type
+#define VOID void
 #define LIST(type) rpc_list<type>
 #define MAP(key, value) rpc_map<key, value>
 

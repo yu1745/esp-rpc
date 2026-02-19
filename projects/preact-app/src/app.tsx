@@ -5,9 +5,15 @@ import { createBleTransport } from './generated/transport-ble';
 import { createSerialTransport } from './generated/transport-serial';
 import type { EsprpcTransport } from './generated/transport';
 import type { User, CreateUserRequest } from './generated/rpc_types';
+import {
+  runPerformanceTest,
+  type PerformanceTestResult,
+  type PerformanceTestProgress,
+  formatPerformanceTestResult,
+} from './performance-test';
 import './app.css';
 
-const WS_URL = 'ws://192.168.4.1/ws'; // ESP32 默认 SoftAP IP
+const WS_URL = 'ws://192.168.4.1/rpc'; // ESP32 默认 SoftAP IP
 
 type TransportMode = 'ws' | 'ble' | 'serial';
 
@@ -29,6 +35,15 @@ export function App() {
   const transportRef = useRef<EsprpcTransport | null>(null);
   const [watching, setWatching] = useState(false);
   const watchUnsubRef = useRef<(() => void) | null>(null);
+
+  // 性能测试状态
+  const [performanceTesting, setPerformanceTesting] = useState(false);
+  const [perfTestDuration, setPerfTestDuration] = useState(10);
+  const [perfTestConcurrency, setPerfTestConcurrency] = useState(1);
+  const [perfTestUserId, setPerfTestUserId] = useState(1);
+  const [perfTestResults, setPerfTestResults] = useState<PerformanceTestResult[]>([]);
+  const [perfTestProgress, setPerfTestProgress] = useState<PerformanceTestProgress | null>(null);
+  const perfAbortControllerRef = useRef<AbortController | null>(null);
 
   const connectWs = async () => {
     try {
@@ -88,6 +103,12 @@ export function App() {
   };
 
   const disconnect = () => {
+    // 停止性能测试
+    perfAbortControllerRef.current?.abort();
+    perfAbortControllerRef.current = null;
+    setPerformanceTesting(false);
+    setPerfTestProgress(null);
+
     watchUnsubRef.current?.();
     watchUnsubRef.current = null;
     setWatching(false);
@@ -98,6 +119,45 @@ export function App() {
     setConnected(false);
     setResult(null);
     setBleDeviceName(null);
+  };
+
+  const startPerformanceTest = async () => {
+    const client = clientRef.current;
+    if (!client) return;
+
+    setPerformanceTesting(true);
+    setPerfTestProgress(null);
+    setPerfTestResults([]);
+
+    const abortController = new AbortController();
+    perfAbortControllerRef.current = abortController;
+
+    try {
+      const result = await runPerformanceTest(client, transportMode, {
+        duration: perfTestDuration,
+        concurrency: perfTestConcurrency,
+        userId: perfTestUserId,
+        onProgress: (progress) => {
+          setPerfTestProgress(progress);
+        },
+        signal: abortController.signal,
+      });
+
+      setPerfTestResults([result]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Performance test failed');
+    } finally {
+      setPerformanceTesting(false);
+      setPerfTestProgress(null);
+      perfAbortControllerRef.current = null;
+    }
+  };
+
+  const stopPerformanceTest = () => {
+    perfAbortControllerRef.current?.abort();
+    perfAbortControllerRef.current = null;
+    setPerformanceTesting(false);
+    setPerfTestProgress(null);
   };
 
   const runRpc = async <T,>(fn: () => Promise<T>) => {
@@ -117,6 +177,7 @@ export function App() {
 
   const [getUserId, setGetUserId] = useState(1);
   const [createReq, setCreateReq] = useState<CreateUserRequest>({ name: '', email: '' });
+  const [createV2Req, setCreateV2Req] = useState<CreateUserRequest>({ name: '', email: '' });
   const [updateId, setUpdateId] = useState(1);
   const [updateReq, setUpdateReq] = useState<CreateUserRequest>({ name: '', email: '' });
   const [deleteId, setDeleteId] = useState(1);
@@ -158,7 +219,7 @@ export function App() {
               value={wsUrl}
               onInput={(e) => setWsUrl((e.target as HTMLInputElement).value)}
               disabled={connected}
-              placeholder="ws://192.168.4.1/ws"
+              placeholder="ws://192.168.4.1/rpc"
             />
           </label>
         )}
@@ -247,6 +308,38 @@ export function App() {
                 disabled={loading || !createReq.name || !createReq.email}
               >
                 CreateUser
+              </button>
+            </div>
+
+            <div class="method-item">
+              <label>CreateUserV2 (void)</label>
+              <div class="method-inputs">
+                <input
+                  placeholder="name"
+                  value={createV2Req.name}
+                  onInput={(e) => setCreateV2Req((r) => ({ ...r, name: (e.target as HTMLInputElement).value }))}
+                />
+                <input
+                  placeholder="email"
+                  value={createV2Req.email}
+                  onInput={(e) => setCreateV2Req((r) => ({ ...r, email: (e.target as HTMLInputElement).value }))}
+                />
+              </div>
+              <button
+                onClick={() => {
+                  const client = clientRef.current;
+                  if (!client) return;
+                  try {
+                    setError(null);
+                    client.CreateUserV2(createV2Req);
+                    setResult({ message: 'CreateUserV2 sent (fire-and-forget)' });
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : 'RPC failed');
+                  }
+                }}
+                disabled={!createV2Req.name || !createV2Req.email}
+              >
+                CreateUserV2
               </button>
             </div>
 
@@ -347,6 +440,72 @@ export function App() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {connected && !performanceTesting && (
+        <div class="card perf-test">
+          <h3>性能测试 - GetUser</h3>
+          <div class="perf-config">
+            <label class="input-row">
+              <span>时长(秒):</span>
+              <input
+                type="number"
+                min="1"
+                max="300"
+                value={perfTestDuration}
+                onInput={(e) => setPerfTestDuration(Number((e.target as HTMLInputElement).value) || 10)}
+              />
+            </label>
+            <label class="input-row">
+              <span>并发数:</span>
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={perfTestConcurrency}
+                onInput={(e) => setPerfTestConcurrency(Number((e.target as HTMLInputElement).value) || 1)}
+              />
+            </label>
+            <label class="input-row">
+              <span>用户ID:</span>
+              <input
+                type="number"
+                min="1"
+                value={perfTestUserId}
+                onInput={(e) => setPerfTestUserId(Number((e.target as HTMLInputElement).value) || 1)}
+              />
+            </label>
+          </div>
+          <button onClick={startPerformanceTest} disabled={performanceTesting || loading}>
+            开始性能测试 ({transportMode.toUpperCase()})
+          </button>
+        </div>
+      )}
+
+      {performanceTesting && (
+        <div class="card perf-test-progress">
+          <h3>性能测试进行中...</h3>
+          {perfTestProgress && (
+            <div class="progress-stats">
+              <p>已发送请求: {perfTestProgress.currentRequest}</p>
+              <p>成功: {perfTestProgress.successfulRequests} | 失败: {perfTestProgress.failedRequests}</p>
+              <p>已用时间: {(perfTestProgress.elapsed / 1000).toFixed(2)} 秒</p>
+              <p>当前速率: {perfTestProgress.currentRequestsPerSecond.toFixed(2)} req/s</p>
+            </div>
+          )}
+          <button onClick={stopPerformanceTest}>停止测试</button>
+        </div>
+      )}
+
+      {perfTestResults.length > 0 && (
+        <div class="card perf-result">
+          <h3>性能测试结果</h3>
+          {perfTestResults.map((result, idx) => (
+            <div key={idx} class="result-item">
+              <pre>{formatPerformanceTestResult(result)}</pre>
+            </div>
+          ))}
         </div>
       )}
 

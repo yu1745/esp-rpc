@@ -9,20 +9,16 @@ export class UserServiceClient {
     this.#transport = transport;
   }
 
-  WatchUsers(): { subscribe(cb: (v: User) => void): () => void } {
-    return { subscribe: (cb) => {
-      this.#transport.subscribe<User>(0, cb);
-      this.#transport.sendStreamRequest(0, []);
-      return () => this.#transport.unsubscribe(0);
-    } };
-  }
-
   async GetUser(_id: number): Promise<UserResponse> {
-    return this.#transport.call<UserResponse>(1, arguments);
+    return this.#transport.call<UserResponse>(0, arguments);
   }
 
   async CreateUser(_request: CreateUserRequest): Promise<UserResponse> {
-    return this.#transport.call<UserResponse>(2, arguments);
+    return this.#transport.call<UserResponse>(1, arguments);
+  }
+
+  CreateUserV2(_request: CreateUserRequest): void {
+    this.#transport.sendStreamRequest(2, arguments);
   }
 
   async UpdateUser(_id: number, _request: CreateUserRequest): Promise<UserResponse> {
@@ -35,6 +31,18 @@ export class UserServiceClient {
 
   async ListUsers(_page: number | undefined): Promise<User[]> {
     return this.#transport.call<User[]>(5, arguments, { timeout: 5000 });
+  }
+
+  WatchUsers(): { subscribe(cb: (v: User) => void): () => void } {
+    return { subscribe: (cb) => {
+      this.#transport.subscribe<User>(6, cb);
+      this.#transport.sendStreamRequest(6, []);
+      return () => this.#transport.unsubscribe(6);
+    } };
+  }
+
+  Ping(): void {
+    this.#transport.sendStreamRequest(7, arguments);
   }
 
 }

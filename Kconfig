@@ -1,5 +1,15 @@
 menu "ESP RPC Configuration"
 
+    config ESPRPC_POOL_BLOCK_SIZE
+        int "RPC memory pool block size (bytes)"
+        default 2048
+        range 64 16384
+        help
+            Fixed size of each block allocated from the internal memory pool.
+            Used for RPC frames (stream emits and responses).
+            Larger frames are dropped and an error is logged.
+            Freed blocks are reused to reduce fragmentation.
+
     config ESPRPC_RPC_CALL_TIMEOUT_MS
         int "RPC 方法调用全局超时时间 (ms)"
         default 2000

@@ -257,7 +257,9 @@ def _emit_decode_response_method(schema: RpcSchema, svc: ServiceDef, m: MethodDe
     lines.append(f'    if (methodId === {method_id}) {{')
     lines.append(f'      const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);')
     lines.append(f'      let off = 0;')
-    if m.ret_type == 'bool':
+    if m.ret_type in ('void', 'VOID'):
+        lines.append(f'      return undefined;')
+    elif m.ret_type == 'bool':
         lines.append(f'      return dv.getUint8(off) !== 0;')
     elif m.ret_type.startswith('LIST('):
         elem_type = _unwrap_type(m.ret_type)

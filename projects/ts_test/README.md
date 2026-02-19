@@ -5,7 +5,7 @@
 ## 前置条件
 
 - **Node.js 22+**（内置 WebSocket）
-- ESP32 设备已烧录 esp_test 并运行（WebSocket 在 `ws://<ip>:80/ws`）
+- ESP32 设备已烧录 esp_test 并运行（WebSocket 在 `ws://<ip>:80/rpc`）
 
 ## 安装
 
@@ -29,9 +29,9 @@ pnpm start
 或指定 WebSocket 地址：
 
 ```bash
-pnpm start ws://192.168.4.1/ws
+pnpm start ws://192.168.4.1/rpc
 # 或通过环境变量
-ESPRPC_WS_URL=ws://192.168.1.100/ws pnpm start
+ESPRPC_WS_URL=ws://192.168.1.100/rpc pnpm start
 ```
 
 ## 测试内容

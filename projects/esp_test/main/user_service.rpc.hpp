@@ -36,10 +36,12 @@ RPC_STRUCT(UserResponse,
 RPC_SERVICE(UserService)
     RPC_METHOD(GetUser, UserResponse, int id)
     RPC_METHOD(CreateUser, UserResponse, CreateUserRequest request)
+    RPC_METHOD(CreateUserV2, VOID, CreateUserRequest request)
     RPC_METHOD(UpdateUser, UserResponse, int id, CreateUserRequest request)
     RPC_METHOD(DeleteUser, bool, int id)
     RPC_METHOD_EX(ListUsers, LIST(User), OPTIONAL(int) page, "timeout:5000")
     RPC_METHOD(WatchUsers, STREAM(User), void)
+    RPC_METHOD(Ping, VOID, void)
 RPC_SERVICE_END(UserService)
 
 #endif /* USER_SERVICE_RPC_HPP */

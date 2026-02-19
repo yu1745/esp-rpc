@@ -136,3 +136,93 @@
   color: #888;
   font-style: italic;
 }
+
+/* 性能测试样式 */
+.perf-test {
+  margin-top: 1rem;
+}
+.perf-test h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+.perf-config {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.perf-config .input-row {
+  margin-bottom: 0;
+}
+.perf-config input {
+  width: 80px;
+  max-width: 80px;
+}
+.perf-test button {
+  padding: 0.6rem 1.2rem;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid #4caf50;
+  background: #4caf50;
+  color: white;
+  font-weight: 500;
+}
+.perf-test button:hover:not(:disabled) {
+  opacity: 0.9;
+}
+.perf-test button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.perf-test-progress {
+  margin-top: 1rem;
+  border: 2px solid #ff9800;
+  background: rgba(255, 152, 0, 0.05);
+}
+.perf-test-progress h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  color: #ff9800;
+}
+.progress-stats {
+  text-align: left;
+  background: #1a1a1a;
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+.progress-stats p {
+  margin: 0.3rem 0;
+}
+.perf-test-progress button {
+  padding: 0.6rem 1.2rem;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid #f44;
+  background: #f44;
+  color: white;
+  font-weight: 500;
+}
+.perf-test-progress button:hover {
+  opacity: 0.9;
+}
+
+.perf-result {
+  margin-top: 1rem;
+}
+.perf-result h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  color: #4caf50;
+}
+.result-item {
+  text-align: left;
+}
+.result-item pre {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-size: 0.9em;
+  line-height: 1.4;
+}

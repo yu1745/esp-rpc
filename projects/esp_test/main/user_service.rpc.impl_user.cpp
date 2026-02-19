@@ -176,3 +176,19 @@ User_list list_users_impl(int_optional page)
     }
     return (User_list){ s_list_buffer, s_user_count };
 }
+
+VOID create_user_v2_impl(CreateUserRequest request)
+{
+    ESP_LOGI(TAG, "CreateUserV2(name=%s, email=%s, password=%s)",
+             request.name ? request.name : "(null)",
+             request.email ? request.email : "(null)",
+             request.password.present && request.password.value ? request.password.value : "(null)");
+    /* 默认实现：调用 create_user_impl 但忽略返回值 */
+    create_user_impl(request);
+}
+
+VOID ping_impl(void)
+{
+    ESP_LOGI(TAG, "Ping()");
+    /* 默认实现：仅记录日志，用于健康检查 */
+}

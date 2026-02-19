@@ -34,23 +34,27 @@ static int bin_read_CreateUserRequest(const uint8_t **p, const uint8_t *end, Cre
 
 extern UserResponse get_user_impl(int id);
 extern UserResponse create_user_impl(CreateUserRequest request);
+extern VOID create_user_v2_impl(CreateUserRequest request);
 extern UserResponse update_user_impl(int id, CreateUserRequest request);
 extern bool delete_user_impl(int id);
 extern User_list list_users_impl(int_optional page);
 extern rpc_stream<User> watch_users_impl(void);
+extern VOID ping_impl(void);
 
 UserService user_service_impl_instance = {
     get_user_impl,
     create_user_impl,
+    create_user_v2_impl,
     update_user_impl,
     delete_user_impl,
     list_users_impl,
     watch_users_impl,
+    ping_impl,
 };
 int UserService_dispatch(uint16_t method_id, const uint8_t *req_buf, size_t req_len,
                       uint8_t **resp_buf, size_t *resp_len, void *svc_ctx) {
     UserService *svc = (UserService *)svc_ctx;
-    uint8_t mth = method_id & 0x0F;
+    uint8_t mth = method_id & 0x1F;
 
     if (mth == 0) {
         const uint8_t *p = req_buf;
@@ -93,6 +97,17 @@ int UserService_dispatch(uint16_t method_id, const uint8_t *req_buf, size_t req_
     if (mth == 2) {
         const uint8_t *p = req_buf;
         const uint8_t *end = req_buf + req_len;
+        CreateUserRequest request = {};
+        if (bin_read_CreateUserRequest((const uint8_t **)&p, end, &request) != 0) return -1;
+        svc->CreateUserV2(request);
+        *resp_buf = NULL;
+        *resp_len = 0;
+        return 0;
+    }
+
+    if (mth == 3) {
+        const uint8_t *p = req_buf;
+        const uint8_t *end = req_buf + req_len;
         int id_val = 0;
         if (esprpc_bin_read_i32((const uint8_t **)&p, end, &id_val) != 0) return -1;
         CreateUserRequest request = {};
@@ -111,7 +126,7 @@ int UserService_dispatch(uint16_t method_id, const uint8_t *req_buf, size_t req_
         return 0;
     }
 
-    if (mth == 3) {
+    if (mth == 4) {
         const uint8_t *p = req_buf;
         const uint8_t *end = req_buf + req_len;
         int id_val = 0;
@@ -127,7 +142,7 @@ int UserService_dispatch(uint16_t method_id, const uint8_t *req_buf, size_t req_
         return 0;
     }
 
-    if (mth == 4) {
+    if (mth == 5) {
         const uint8_t *p = req_buf;
         const uint8_t *end = req_buf + req_len;
         int_optional page = { false, 0 };
@@ -160,13 +175,22 @@ int UserService_dispatch(uint16_t method_id, const uint8_t *req_buf, size_t req_
         return 0;
     }
 
-    if (mth == 5) {
+    if (mth == 6) {
         const uint8_t *p = req_buf;
         const uint8_t *end = req_buf + req_len;
         esprpc_set_stream_method_id(method_id);
         rpc_stream<User> r = svc->WatchUsers();
         esprpc_set_stream_method_id(ESPRPC_STREAM_METHOD_ID_NONE);
         (void)r;
+        *resp_buf = NULL;
+        *resp_len = 0;
+        return 0;
+    }
+
+    if (mth == 7) {
+        const uint8_t *p = req_buf;
+        const uint8_t *end = req_buf + req_len;
+        svc->Ping();
         *resp_buf = NULL;
         *resp_len = 0;
         return 0;

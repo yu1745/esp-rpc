@@ -30,9 +30,18 @@ typedef struct {
     httpd_req_t *current_req;  /* handler 内当前请求，用于同步发送（避免 httpd_queue_work 死锁） */
     esprpc_transport_on_recv_fn on_recv;
     void *on_recv_ctx;
+    char *uri_path;  /* WebSocket URI 路径，需手动释放内存 */
 } ws_ctx_t;
 
 static ws_ctx_t s_ws_ctx = {0};
+
+static httpd_uri_t ws_uri = {
+    .uri       = "/rpc",  /* 默认路径，会在 esprpc_transport_ws_start_server 中更新 */
+    .method    = HTTP_GET,
+    .handler   = ws_handler,
+    .user_ctx  = NULL,
+    .is_websocket = true,
+};
 
 static void ws_send_complete_cb(esp_err_t err, int socket, void *arg)
 {
@@ -142,8 +151,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-static const httpd_uri_t ws_uri = {
-    .uri       = "/ws",
+static httpd_uri_t ws_uri = {
     .method    = HTTP_GET,
     .handler   = ws_handler,
     .user_ctx  = NULL,
@@ -161,19 +169,41 @@ esp_err_t esprpc_transport_ws_init(void)
 {
     memset(&s_ws_ctx, 0, sizeof(s_ws_ctx));
     s_ws_ctx.sockfd = -1;
+    /* 分配默认 URI 路径 */
+    s_ws_ctx.uri_path = strdup("/rpc");
+    if (!s_ws_ctx.uri_path) {
+        ESP_LOGE(TAG, "Failed to allocate default URI path");
+        return ESP_ERR_NO_MEM;
+    }
+    ws_uri.uri = s_ws_ctx.uri_path;
     ESP_LOGI(TAG, "WebSocket transport init (stub - call esprpc_transport_ws_start_server when WiFi ready)");
     return ESP_OK;
 }
 
 /**
- * @brief 启动 WebSocket 端点：httpd_server 为空则内部创建 httpd，非空则使用传入的服务器并仅注册 /ws
+ * @brief 启动 WebSocket 端点：httpd_server 为空则内部创建 httpd，非空则使用传入的服务器
+ * @param httpd_server 可空：NULL 时内部创建并持有 httpd；非 NULL 时使用传入的 httpd_handle_t
+ * @param uri_path WebSocket URI 路径，如 "/rpc" 或 "/ws"，NULL 则使用默认路径 "/rpc"
  */
-esp_err_t esprpc_transport_ws_start_server(void *httpd_server)
+esp_err_t esprpc_transport_ws_start_server(void *httpd_server, const char *uri_path)
 {
     if (s_ws_ctx.server) {
         ESP_LOGW(TAG, "WebSocket already registered");
         return ESP_OK;
     }
+
+    /* 设置 URI 路径 */
+    const char *path = uri_path ? uri_path : "/rpc";
+    if (s_ws_ctx.uri_path && strcmp(s_ws_ctx.uri_path, path) != 0) {
+        /* 路径变化，释放旧路径并分配新路径 */
+        free(s_ws_ctx.uri_path);
+        s_ws_ctx.uri_path = strdup(path);
+        if (!s_ws_ctx.uri_path) {
+            ESP_LOGE(TAG, "Failed to allocate URI path");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    ws_uri.uri = s_ws_ctx.uri_path;
 
     httpd_handle_t server = (httpd_handle_t)httpd_server;
 
@@ -204,7 +234,7 @@ esp_err_t esprpc_transport_ws_start_server(void *httpd_server)
         return ret;
     }
 
-    ESP_LOGI(TAG, "WebSocket at /ws (server %s)", s_ws_ctx.server_owned ? "owned" : "external");
+    ESP_LOGI(TAG, "WebSocket at %s (server %s)", ws_uri.uri, s_ws_ctx.server_owned ? "owned" : "external");
     return ESP_OK;
 }
 
@@ -224,9 +254,10 @@ esp_err_t esprpc_transport_ws_init(void)
     return ESP_ERR_NOT_SUPPORTED;
 }
 
-esp_err_t esprpc_transport_ws_start_server(void *httpd_server)
+esp_err_t esprpc_transport_ws_start_server(void *httpd_server, const char *uri_path)
 {
     (void)httpd_server;
+    (void)uri_path;
     return ESP_ERR_NOT_SUPPORTED;
 }
 
