@@ -1,6 +1,6 @@
 # ESP-IDF RPC 框架
 
-H5/TypeScript 与 ESP32 之间的 RPC 通信框架，支持单向调用与双向流式数据交换。
+H5/TypeScript 与 ESP32 之间的 RPC 通信框架，支持单向调用与流式返回。
 
 ## 特性
 
