@@ -7,7 +7,7 @@ if(NOT EXISTS "${WIFI_CONFIG_LOCAL}")
 endif()
 
 idf_component_register(
-    SRCS "wifi_sta.cpp" "main.cpp" "user_service.rpc.gen.cpp" "user_service.rpc.impl_user.cpp"
+    SRCS "wifi_sta.cpp" "main.cpp"
     INCLUDE_DIRS "."
     REQUIRES esp-rpc nvs_flash esp_netif esp_event esp_wifi esp_http_server driver esp_driver_usb_serial_jtag
 )

@@ -17,7 +17,8 @@
 #include "esprpc.h"
 #include "esprpc_service.h"
 #include "esprpc_transport.h"
-#include "user_service.rpc.gen.hpp"
+#include "esprpc.hpp"
+#include "user_service.hpp"
 #include "wifi_config_local.h"
 #include "wifi_sta.hpp"
 
@@ -325,9 +326,8 @@ extern "C" void app_main(void)
   }
 #endif
 
-  /* 注册 UserService（实现由 generator 生成占位） */
-  esprpc_register_service_ex("UserService", &user_service_impl_instance,
-                             UserService_dispatch);
+  /* 注册 UserService（使用 C++ 模板自动生成 dispatch） */
+  UserService_register_rpc();
 
   ESP_LOGI(TAG, "RPC ready - WebSocket at ws://<ip>:80/ws when WiFi connected"
 #if CONFIG_ESPRPC_ENABLE_BLE

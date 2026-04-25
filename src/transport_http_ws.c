@@ -35,14 +35,6 @@ typedef struct {
 
 static ws_ctx_t s_ws_ctx = {0};
 
-static httpd_uri_t ws_uri = {
-    .uri       = "/rpc",  /* 默认路径，会在 esprpc_transport_ws_start_server 中更新 */
-    .method    = HTTP_GET,
-    .handler   = ws_handler,
-    .user_ctx  = NULL,
-    .is_websocket = true,
-};
-
 static void ws_send_complete_cb(esp_err_t err, int socket, void *arg)
 {
     (void)err;
