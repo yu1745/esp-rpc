@@ -17,10 +17,6 @@ function closeCodeMessage(code: number): string {
   return map[code] ?? `未知错误`;
 }
 
-/**
- * 帧格式: [1B method_id][2B invoke_id LE][2B payload_len LE][binary payload]
- * invoke_id: 0=流式推送, 非0=请求-响应匹配
- */
 function encodeFrame(methodId: number, invokeId: number, payload: Uint8Array): ArrayBuffer {
   const frame = new Uint8Array(5 + payload.length);
   frame[0] = methodId;
@@ -87,7 +83,7 @@ export function createWebSocketTransport(url: string): EsprpcTransport {
         ws.onerror = () => {
           if (!settled) {
             errorFallback = setTimeout(() => {
-              if (!settled) settle(new Error(`连接失败: ${url}，请检查地址、网络或设备是否在线`));
+              if (!settled) settle(new Error(`连接失败: ${url}`));
             }, 100);
           }
         };

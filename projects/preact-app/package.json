@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "gen": "cd ../.. && python generator/main.py -o projects/preact-app/src/generated projects/esp_test/main/user_service.rpc.hpp"
+    "gen": "python ../../generator/main.py -o src/generated ../../projects/esp_test/main/user_service.hpp"
   },
   "dependencies": {
     "preact": "^10.27.2"

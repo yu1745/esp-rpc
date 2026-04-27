@@ -92,4 +92,13 @@ export class UserServiceClient {
     }
     return users;
   }
+
+  CreateUserV2(request: CreateUserRequest): void {
+    const w = new BufferWriter();
+    w.str(request.name);
+    w.str(request.email);
+    w.bool(request.password != null);
+    if (request.password != null) w.str(request.password!);
+    this.#transport.call(6, w.toBytes()).catch(() => {});
+  }
 }

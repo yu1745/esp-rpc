@@ -126,12 +126,20 @@ public:
 static UserService s_user_service;
 
 ESPRPC_SERVICE(UserService, s_user_service,
+    // @rpc GetUser(int32_t id) -> UserResponse
     esprpc::method<UserService, &UserService::GetUser>(0),
+    // @rpc CreateUser(CreateUserRequest req) -> UserResponse
     esprpc::method<UserService, &UserService::CreateUser>(1),
+    // @rpc CreateUserV2(CreateUserRequest req) -> void
     esprpc::method<UserService, &UserService::CreateUserV2>(2, esprpc::MF_VOID),
+    // @rpc UpdateUser(int32_t id, CreateUserRequest req) -> UserResponse
     esprpc::method<UserService, &UserService::UpdateUser>(3),
+    // @rpc DeleteUser(int32_t id) -> bool
     esprpc::method<UserService, &UserService::DeleteUser>(4),
+    // @rpc ListUsers(esprpc::Optional<int32_t> page) -> esprpc::List<User>
     esprpc::method<UserService, &UserService::ListUsers>(5),
+    // @rpc WatchUsers() -> stream<User>
     esprpc::method<UserService, &UserService::WatchUsers>(6, esprpc::MF_STREAM),
+    // @rpc Ping() -> void
     esprpc::method<UserService, &UserService::Ping>(7, esprpc::MF_VOID)
 )
