@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-/** 收到数据时调用，通常是递归掉哟个 esprpc_handle_request */
+/** 收到数据时调用，通常是递归调用 esprpc_handle_request */
 typedef void (*esprpc_transport_on_recv_fn)(const uint8_t *data, size_t len, void *user_ctx);
 
 /**

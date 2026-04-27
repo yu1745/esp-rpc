@@ -32,6 +32,11 @@ class RpcStruct:
     fields: list[StructField]
 
 @dataclass
+class RpcEnum:
+    name: str
+    values: dict[str, int]
+
+@dataclass
 class MethodParam:
     name: str
     cpp_type: str
@@ -79,13 +84,35 @@ def extract_macro_call(text: str, macro_name: str) -> list[tuple[str, str]]:
 # Parser
 # ---------------------------------------------------------------------------
 
-def parse_header(filepath: str) -> tuple[list[RpcStruct], list[RpcService]]:
+def parse_header(filepath: str) -> tuple[list[RpcEnum], list[RpcStruct], list[RpcService]]:
     with open(filepath, 'r', encoding='utf-8') as f:
         text = f.read()
 
+    enums = _parse_enums(text)
     structs = _parse_structs(text)
     services = _parse_services(text, structs)
-    return structs, services
+    return enums, structs, services
+
+
+def _parse_enums(text: str) -> list[RpcEnum]:
+    enums = []
+    # Match: enum X { A = 1, B = 2 } or enum X { A, B }
+    pattern = re.compile(r'enum\s+(\w+)\s*\{([^}]*)\}')
+    for m in pattern.finditer(text):
+        name = m.group(1)
+        body = m.group(2)
+        values = {}
+        for pair in body.split(','):
+            pair = pair.strip()
+            if not pair:
+                continue
+            parts = pair.split('=')
+            key = parts[0].strip()
+            val = int(parts[1].strip()) if len(parts) > 1 else 0
+            values[key] = val
+        if values:
+            enums.append(RpcEnum(name, values))
+    return enums
 
 
 def _parse_structs(text: str) -> list[RpcStruct]:
@@ -143,7 +170,7 @@ def _parse_services(text: str, structs: list[RpcStruct]) -> list[RpcService]:
         rpc_annotations = _parse_rpc_annotations(methods_body)
 
         method_pattern = re.compile(
-            r'esprpc::method\s*<\s*\w+\s*,\s*&\s*\w+\s*::\s*(\w+)\s*>\s*\(\s*(\d+)\s*(?:,\s*(MF_\w+))?\s*\)',
+            r'esprpc::method\s*<\s*\w+\s*,\s*&\s*\w+\s*::\s*(\w+)\s*>\s*\(\s*(\d+)\s*(?:,\s*(?:esprpc::)?(MF_\w+))?\s*\)',
             re.DOTALL
         )
         methods = []
@@ -225,6 +252,10 @@ def unwrap_optional(t: str) -> str | None:
     return m.group(1) if m else None
 
 
+def is_optional(t: str) -> bool:
+    return unwrap_optional(t) is not None
+
+
 def unwrap_list(t: str) -> str | None:
     m = re.match(r'(?:esprpc::)?List\s*<\s*(.+?)\s*>', t)
     return m.group(1) if m else None
@@ -247,7 +278,7 @@ def is_string(t: str) -> bool:
     return t in STRING_TYPES
 
 
-def ts_type(cpp_type: str) -> str:
+def ts_type(cpp_type: str, enum_names: set[str] = set()) -> str:
     t = strip_namespace(cpp_type)
     if t in PRIMITIVE_TYPES:
         return 'number' if t != 'bool' else 'boolean'
@@ -255,23 +286,27 @@ def ts_type(cpp_type: str) -> str:
         return 'string'
     inner = unwrap_optional(t)
     if inner:
-        return f'{ts_type(inner)} | undefined'
+        return f'{ts_type(inner, enum_names)} | undefined'
     inner = unwrap_list(t)
     if inner:
-        return f'{ts_type(inner)}[]'
+        return f'{ts_type(inner, enum_names)}[]'
+    if t in enum_names:
+        return t
     return t
 
 
-def ts_type_for_return(cpp_type: str) -> str:
+def ts_type_for_return(cpp_type: str, enum_names: set[str] = set()) -> str:
     t = strip_namespace(cpp_type)
     inner = unwrap_stream(t)
     if inner:
-        return ts_type(inner)
+        return ts_type(inner, enum_names)
     inner = unwrap_list(t)
     if inner:
-        return f'{ts_type(inner)}[]'
+        return f'{ts_type(inner, enum_names)}[]'
     if t in PRIMITIVE_TYPES:
         return 'number' if t != 'bool' else 'boolean'
+    if t in enum_names:
+        return t
     return t
 
 
@@ -291,63 +326,70 @@ SER_READ = {
 }
 
 
-def gen_write(field: StructField, indent: str) -> str:
+def gen_write(field: StructField, indent: str, prefix: str = '', enum_names: set[str] = set()) -> str:
     t = field.cpp_type.strip()
-    name = field.name
+    name = prefix + field.name
     inner_opt = unwrap_optional(t)
     if inner_opt:
-        inner = gen_write(StructField(name, inner_opt), indent + '  ')
+        inner = gen_write(StructField(name, inner_opt), indent + '  ', enum_names=enum_names)
         return f'{indent}w.writeBool({name} !== undefined);\n{indent}if ({name} !== undefined) {{\n{inner}{indent}}}'
     inner_list = unwrap_list(t)
     if inner_list:
-        inner = gen_write(StructField('item', inner_list), indent + '  ')
+        inner = gen_write(StructField('item', inner_list), indent + '  ', enum_names=enum_names)
         return f'{indent}w.writeU32({name}.length);\n{indent}for (const item of {name}) {{\n{inner}{indent}}}'
     t_clean = strip_namespace(t)
-    if is_primitive(t_clean):
-        return f'{indent}w{SER_WRITE[t_clean]}({name});'
+    if is_primitive(t_clean) or t_clean in enum_names:
+        ser = SER_WRITE.get(t_clean, '.writeI32')
+        return f'{indent}w{ser}({name});'
     if is_string(t_clean):
         return f'{indent}w.writeStr({name});'
     return f'{indent}write{t_clean}(w, {name});'
 
 
-def gen_read(field: StructField, indent: str) -> str:
+def gen_read(field: StructField, indent: str, enum_names: set[str] = set()) -> str:
     t = field.cpp_type.strip()
     name = field.name
     inner_opt = unwrap_optional(t)
     if inner_opt:
-        inner = gen_read(StructField(name, inner_opt), indent)
+        inner = gen_read(StructField(name, inner_opt), indent, enum_names)
         return f'{indent}r.readBool() ? ({inner.strip()}) : undefined'
     inner_list = unwrap_list(t)
     if inner_list:
-        inner = gen_read(StructField('item', inner_list), indent)
+        inner = gen_read(StructField('item', inner_list), indent, enum_names)
         r = f'{indent}(() => {{\n'
         r += f'{indent}  const _c = r.readU32();\n'
-        r += f'{indent}  const _a: typeof({unnest_for_read(inner_list)})[] = [];\n'
+        r += f'{indent}  const _a: typeof({unnest_for_read(inner_list, enum_names)})[] = [];\n'
         r += f'{indent}  for (let _i = 0; _i < _c; _i++) _a.push({inner.strip()});\n'
         r += f'{indent}  return _a;\n'
         r += f'{indent}}})()'
         return r
     t_clean = strip_namespace(t)
-    if is_primitive(t_clean):
-        return f'{indent}r{SER_READ[t_clean]}'
+    if is_primitive(t_clean) or t_clean in enum_names:
+        ser = SER_READ.get(t_clean, '.readI32()')
+        expr = f'{indent}r{ser}'
+        if t_clean in enum_names:
+            expr += f' as {t_clean}'
+        return expr
     if is_string(t_clean):
         return f'{indent}r.readStr()'
     return f'{indent}read{t_clean}(r)'
 
 
-def unnest_for_read(cpp_type: str) -> str:
+def unnest_for_read(cpp_type: str, enum_names: set[str] = set()) -> str:
     """Get the item type expression for use in typeof(expr) array."""
     t = strip_namespace(cpp_type)
     inner_list = unwrap_list(t)
     if inner_list:
-        return f'{unnest_for_read(inner_list)}[]'
+        return f'{unnest_for_read(inner_list, enum_names)}[]'
     if is_primitive(t):
         return 'number' if t != 'bool' else 'boolean'
     if is_string(t):
         return 'string'
     inner_opt = unwrap_optional(t)
     if inner_opt:
-        return f'{unnest_for_read(inner_opt)} | undefined'
+        return f'{unnest_for_read(inner_opt, enum_names)} | undefined'
+    if t in enum_names:
+        return t
     return t
 
 
@@ -355,15 +397,26 @@ def unnest_for_read(cpp_type: str) -> str:
 # Code generation
 # ---------------------------------------------------------------------------
 
-def generate_types(structs: list[RpcStruct]) -> str:
+def generate_types(enums: list[RpcEnum], structs: list[RpcStruct], enum_names: set[str]) -> str:
     lines = []
     lines.append('// Auto-generated by esp-rpc generator - do not edit\n')
+    lines.append("import { BufferWriter, BufferReader } from './binary';\n")
+
+    # Enums
+    for e in enums:
+        lines.append(f'export const {e.name} = {{')
+        for k, v in e.values.items():
+            lines.append(f'  {k}: {v},')
+        lines.append('} as const;')
+        lines.append(f'export type {e.name} = (typeof {e.name})[keyof typeof {e.name}];\n')
 
     # Interfaces
     for s in structs:
         lines.append(f'export interface {s.name} {{')
         for f in s.fields:
-            lines.append(f'  {f.name}: {ts_type(f.cpp_type)};')
+            opt = '?' if is_optional(f.cpp_type) else ''
+            t = ts_type(f.cpp_type, enum_names)
+            lines.append(f'  {f.name}{opt}: {t};')
         lines.append('}\n')
 
     # Serialize / deserialize functions
@@ -371,13 +424,13 @@ def generate_types(structs: list[RpcStruct]) -> str:
         sn = s.name
         lines.append(f'export function write{sn}(w: BufferWriter, v: {sn}): void {{')
         for f in s.fields:
-            lines.append(gen_write(f, '  '))
+            lines.append(gen_write(f, '  ', prefix='v.', enum_names=enum_names))
         lines.append('}\n')
 
         lines.append(f'export function read{sn}(r: BufferReader): {sn} {{')
         lines.append('  return {')
         for i, f in enumerate(s.fields):
-            val = gen_read(f, '    ')
+            val = gen_read(f, '    ', enum_names)
             comma = ',' if i < len(s.fields) - 1 else ','
             lines.append(f'    {f.name}: {val}{comma}')
         lines.append('  };')
@@ -386,7 +439,7 @@ def generate_types(structs: list[RpcStruct]) -> str:
     return '\n'.join(lines) + '\n'
 
 
-def generate_client(svc: RpcService, structs: list[RpcStruct]) -> str:
+def generate_client(svc: RpcService, structs: list[RpcStruct], enum_names: set[str] = set()) -> str:
     lines = []
     lines.append('// Auto-generated by esp-rpc generator - do not edit\n')
     lines.append("import { BufferWriter, BufferReader } from './binary';")
@@ -403,7 +456,7 @@ def generate_client(svc: RpcService, structs: list[RpcStruct]) -> str:
                 type_refs.add(inner_stream)
             elif inner_list:
                 type_refs.add(strip_namespace(inner_list))
-            elif ret_clean not in PRIMITIVE_TYPES and not is_string(ret_clean):
+            elif ret_clean not in PRIMITIVE_TYPES and not is_string(ret_clean) and ret_clean not in enum_names:
                 type_refs.add(ret_clean)
         for p in m.params:
             t = strip_namespace(p.cpp_type)
@@ -413,11 +466,19 @@ def generate_client(svc: RpcService, structs: list[RpcStruct]) -> str:
                 t = strip_namespace(inner_opt)
             if inner_list:
                 t = strip_namespace(inner_list)
-            if t not in PRIMITIVE_TYPES and not is_string(t):
+            if t not in PRIMITIVE_TYPES and not is_string(t) and t not in enum_names:
                 type_refs.add(t)
 
     if type_refs:
-        lines.append(f"import type {{ {', '.join(sorted(type_refs))} }} from './rpc_types';")
+        lines.append(f"import {{ {', '.join(sorted(type_refs))} }} from './rpc_types';")
+
+    func_refs = set()
+    for s in structs:
+        func_refs.add(f'write{s.name}')
+        func_refs.add(f'read{s.name}')
+    func_refs -= type_refs
+    if func_refs:
+        lines.append(f"import {{ {', '.join(sorted(func_refs))} }} from './rpc_types';")
     lines.append('')
 
     svc_name_clean = svc.name.replace('Service', '')
@@ -428,18 +489,18 @@ def generate_client(svc: RpcService, structs: list[RpcStruct]) -> str:
     lines.append('  }\n')
 
     for m in svc.methods:
-        _gen_method(lines, m)
+        _gen_method(lines, m, enum_names)
         lines.append('')
 
     lines.append('}\n')
     return '\n'.join(lines) + '\n'
 
 
-def _gen_method(lines: list[str], m: RpcMethod):
+def _gen_method(lines: list[str], m: RpcMethod, enum_names: set[str] = set()):
     is_void = m.flags == 'MF_VOID'
     is_stream = m.flags == 'MF_STREAM'
 
-    params_str = ', '.join(f'{p.name}: {ts_type(p.cpp_type)}' for p in m.params)
+    params_str = ', '.join(f'{p.name}: {ts_type(p.cpp_type, enum_names)}' for p in m.params)
 
     if is_stream:
         inner = unwrap_stream(m.return_type) or m.return_type
@@ -460,7 +521,7 @@ def _gen_method(lines: list[str], m: RpcMethod):
     if is_void:
         lines.append(f'  {m.name}({params_str}): void {{')
     else:
-        ret_ts = ts_type_for_return(m.return_type)
+        ret_ts = ts_type_for_return(m.return_type, enum_names)
         lines.append(f'  async {m.name}({params_str}): Promise<{ret_ts}> {{')
 
     has_list_return = 'List<' in m.return_type
@@ -472,7 +533,7 @@ def _gen_method(lines: list[str], m: RpcMethod):
             if inner_opt:
                 lines.append(f'    w.writeBool({p.name} !== undefined);')
                 lines.append(f'    if ({p.name} !== undefined) {{')
-                pf = StructField('inner', inner_opt)
+                pf = StructField(p.name, inner_opt)
                 inner_code = gen_write(pf, '      ')
                 lines.append(inner_code)
                 lines.append('    }')
@@ -481,10 +542,16 @@ def _gen_method(lines: list[str], m: RpcMethod):
                 lines.append(gen_write(pf, '    '))
 
         timeout_arg = ', { timeout: 5000 }' if has_list_return else ''
-        lines.append(f'    const resp = await this.#transport.call({m.method_id}, w.toBytes(){timeout_arg});')
+        if is_void:
+            lines.append(f'    this.#transport.call({m.method_id}, w.toBytes());')
+        else:
+            lines.append(f'    const resp = await this.#transport.call({m.method_id}, w.toBytes(){timeout_arg});')
     else:
         timeout_arg = ', { timeout: 5000 }' if has_list_return else ''
-        lines.append(f'    const resp = await this.#transport.call({m.method_id}, new Uint8Array(0){timeout_arg});')
+        if is_void:
+            lines.append(f'    this.#transport.call({m.method_id}, new Uint8Array(0));')
+        else:
+            lines.append(f'    const resp = await this.#transport.call({m.method_id}, new Uint8Array(0){timeout_arg});')
 
     if is_void:
         lines.append('  }')
@@ -525,23 +592,26 @@ def main():
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    all_enums: list[RpcEnum] = []
     all_structs: list[RpcStruct] = []
     all_services: list[RpcService] = []
 
     for input_path in args.inputs:
-        structs, services = parse_header(input_path)
+        enums, structs, services = parse_header(input_path)
+        all_enums.extend(enums)
         all_structs.extend(structs)
         all_services.extend(services)
 
-    types_content = generate_types(all_structs)
+    enum_names = {e.name for e in all_enums}
+
+    types_content = generate_types(all_enums, all_structs, enum_names)
     (output_dir / 'rpc_types.ts').write_text(types_content, encoding='utf-8')
     print(f'  Generated {output_dir / "rpc_types.ts"}')
 
     for svc in all_services:
-        client_content = generate_client(svc, all_structs)
-        svc_lower = svc.name[0].lower() + svc.name[1:]
-        (output_dir / f'{svc_lower}_client.ts').write_text(client_content, encoding='utf-8')
-        print(f'  Generated {output_dir / f"{svc_lower}_client.ts"}')
+        client_content = generate_client(svc, all_structs, enum_names)
+        (output_dir / 'rpc_client.ts').write_text(client_content, encoding='utf-8')
+        print(f'  Generated {output_dir / "rpc_client.ts"}')
 
 
 if __name__ == '__main__':

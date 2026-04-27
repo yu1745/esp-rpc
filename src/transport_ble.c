@@ -5,7 +5,7 @@
  * 通过 NimBLE GATT 服务收发 RPC 帧，与 WebSocket 传输并列。
  * 帧格式与 esprpc 一致: [1B method_id][2B invoke_id LE][2B payload_len LE][payload]
  *
- * 服务 UUID: 0xE5R0 (ESPRPC 自定义)
+ * 服务 UUID: 0xE530 (ESPRPC 自定义)
  * - 特征 TX (写): 客户端 -> ESP32 请求
  * - 特征 RX (通知): ESP32 -> 客户端 响应
  */
@@ -219,7 +219,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
                               &adv_params, ble_gap_event, NULL);
         }
         break;
-    case BLE_GAP_EVENT_ADV_COMPLETE:
+    case BLE_GAP_EVENT_ADV_COMPLETE: {
         struct ble_gap_adv_params adv_params = {
             .conn_mode = BLE_GAP_CONN_MODE_UND,
             .disc_mode = BLE_GAP_DISC_MODE_GEN,
@@ -230,6 +230,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
                           &adv_params,
                           ble_gap_event, NULL);
         break;
+    }
     default:
         break;
     }

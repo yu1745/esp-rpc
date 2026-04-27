@@ -68,22 +68,26 @@ public:
 class Reader {
     const uint8_t *pos_;
     const uint8_t *end_;
+    bool error_ = false;
 
 public:
     Reader(const uint8_t *data, size_t len) : pos_(data), end_(data + len) {}
 
+    bool error() const { return error_; }
+    void reset() { error_ = false; }
+
     uint8_t read_u8() {
-        if (pos_ >= end_) return 0;
+        if (pos_ >= end_) { error_ = true; return 0; }
         return *pos_++;
     }
     uint16_t read_u16() {
-        if (pos_ + 2 > end_) return 0;
+        if (pos_ + 2 > end_) { error_ = true; return 0; }
         uint16_t v = (uint16_t)pos_[0] | ((uint16_t)pos_[1] << 8);
         pos_ += 2;
         return v;
     }
     uint32_t read_u32() {
-        if (pos_ + 4 > end_) return 0;
+        if (pos_ + 4 > end_) { error_ = true; return 0; }
         uint32_t v = (uint32_t)pos_[0] | ((uint32_t)pos_[1] << 8) |
                      ((uint32_t)pos_[2] << 16) | ((uint32_t)pos_[3] << 24);
         pos_ += 4;
@@ -92,7 +96,7 @@ public:
     int32_t read_i32() { return (int32_t)read_u32(); }
     bool read_bool() { return read_u8() != 0; }
     void read_bytes(void *dst, size_t len) {
-        if (pos_ + len > end_) len = end_ - pos_;
+        if (pos_ + len > end_) { error_ = true; len = end_ - pos_; }
         memcpy(dst, pos_, len);
         pos_ += len;
     }
@@ -114,11 +118,22 @@ struct Serializer;
 
 ESPRPC_PRIMITIVE(int32_t, write_i32, read_i32)
 ESPRPC_PRIMITIVE(uint32_t, write_u32, read_u32)
-ESPRPC_PRIMITIVE(int16_t, write_u16, read_u16)
+
+template <>
+struct Serializer<int16_t> {
+    static void write(Buffer &buf, int16_t v) { buf.write_u16((uint16_t)v); }
+    static void read(Reader &r, int16_t &v) { v = (int16_t)r.read_u16(); }
+};
+
 ESPRPC_PRIMITIVE(uint16_t, write_u16, read_u16)
 ESPRPC_PRIMITIVE(uint8_t, write_u8, read_u8)
+
+template <>
+struct Serializer<int8_t> {
+    static void write(Buffer &buf, int8_t v) { buf.write_u8((uint8_t)v); }
+    static void read(Reader &r, int8_t &v) { v = (int8_t)r.read_u8(); }
+};
 ESPRPC_PRIMITIVE(bool, write_u8, read_bool)
-ESPRPC_PRIMITIVE(int, write_i32, read_i32)
 
 #undef ESPRPC_PRIMITIVE
 
@@ -201,8 +216,6 @@ struct List {
 
 template <typename T>
 struct Serializer<List<T>> {
-    static constexpr size_t READ_MAX = 16;
-
     static void write(Buffer &buf, const List<T> &v) {
         buf.write_u32((uint32_t)v.len);
         for (size_t i = 0; i < v.len; i++)
@@ -210,21 +223,21 @@ struct Serializer<List<T>> {
     }
     static void read(Reader &r, List<T> &v) {
         uint32_t n = r.read_u32();
-        v.len = n;
-        if (n == 0) return;
-        if (v.items) {
-            size_t actual = n < READ_MAX ? n : READ_MAX;
-            v.len = actual;
-            for (size_t i = 0; i < actual; i++)
-                Serializer<T>::read(r, v.items[i]);
-            T tmp;
-            for (size_t i = actual; i < n; i++)
-                Serializer<T>::read(r, tmp);
-        } else {
+        if (n == 0 || !v.items) {
+            v.len = 0;
             T tmp;
             for (uint32_t i = 0; i < n; i++)
                 Serializer<T>::read(r, tmp);
+            return;
         }
+        size_t cap = v.len;
+        size_t actual = n < cap ? n : cap;
+        for (size_t i = 0; i < actual; i++)
+            Serializer<T>::read(r, v.items[i]);
+        v.len = actual;
+        T tmp;
+        for (size_t i = actual; i < n; i++)
+            Serializer<T>::read(r, tmp);
     }
 };
 
@@ -279,6 +292,7 @@ struct MethodDispatch<C, Method> {
             std::tuple<std::remove_const_t<std::remove_reference_t<Args>>...>;
         ArgStorage args{};
         read_tuple(reader, args);
+        if (reader.error()) return -1;
 
         constexpr bool is_void = is_void_return<R>::value;
         constexpr bool is_stream = is_rpc_stream<R>::value;
@@ -315,12 +329,6 @@ MethodInfo method(uint16_t id, uint32_t flags = 0) {
     return MethodInfo{id, flags, &MethodDispatch<C, Method>::dispatch};
 }
 
-template <typename C, typename R, typename... Args,
-          R (C::*Method)(Args...)>
-MethodInfo method(uint16_t id, uint32_t flags = 0) {
-    return MethodInfo{id, flags, &MethodDispatch<C, Method>::dispatch};
-}
-
 template <typename T>
 void stream_emit(uint16_t method_id, const T &v) {
     Buffer buf(128);
@@ -335,8 +343,8 @@ void stream_emit(uint16_t method_id, const T &v) {
 #define ESPRPC_CONCAT(a, b) ESPRPC_CONCAT_I(a, b)
 #define ESPRPC_CONCAT_I(a, b) a##b
 
-#define ESPRPC_NARG(...) ESPRPC_NARG_I(__VA_ARGS__, 8,7,6,5,4,3,2,1,0)
-#define ESPRPC_NARG_I(a1,a2,a3,a4,a5,a6,a7,a8,n,...) n
+#define ESPRPC_NARG(...) ESPRPC_NARG_I(__VA_ARGS__, 16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0)
+#define ESPRPC_NARG_I(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,n,...) n
 
 /* ---------- ESPRPC_STRUCT：定义结构体 + 自动序列化 ---------- */
 
@@ -357,6 +365,14 @@ void stream_emit(uint16_t method_id, const T &v) {
 #define ESPRPC_FOR_EACH_6(m, p, ...) m(p) ESPRPC_FOR_EACH_5(m, __VA_ARGS__)
 #define ESPRPC_FOR_EACH_7(m, p, ...) m(p) ESPRPC_FOR_EACH_6(m, __VA_ARGS__)
 #define ESPRPC_FOR_EACH_8(m, p, ...) m(p) ESPRPC_FOR_EACH_7(m, __VA_ARGS__)
+#define ESPRPC_FOR_EACH_9(m, p, ...) m(p) ESPRPC_FOR_EACH_8(m, __VA_ARGS__)
+#define ESPRPC_FOR_EACH_10(m, p, ...) m(p) ESPRPC_FOR_EACH_9(m, __VA_ARGS__)
+#define ESPRPC_FOR_EACH_11(m, p, ...) m(p) ESPRPC_FOR_EACH_10(m, __VA_ARGS__)
+#define ESPRPC_FOR_EACH_12(m, p, ...) m(p) ESPRPC_FOR_EACH_11(m, __VA_ARGS__)
+#define ESPRPC_FOR_EACH_13(m, p, ...) m(p) ESPRPC_FOR_EACH_12(m, __VA_ARGS__)
+#define ESPRPC_FOR_EACH_14(m, p, ...) m(p) ESPRPC_FOR_EACH_13(m, __VA_ARGS__)
+#define ESPRPC_FOR_EACH_15(m, p, ...) m(p) ESPRPC_FOR_EACH_14(m, __VA_ARGS__)
+#define ESPRPC_FOR_EACH_16(m, p, ...) m(p) ESPRPC_FOR_EACH_15(m, __VA_ARGS__)
 
 #define ESPRPC_FOR_EACH(m, ...) ESPRPC_CONCAT(ESPRPC_FOR_EACH_, ESPRPC_NARG(__VA_ARGS__))(m, __VA_ARGS__)
 
@@ -387,6 +403,14 @@ void stream_emit(uint16_t method_id, const T &v) {
 #define ESPRPC_WRITE_6(v, f, ...) ::esprpc::write(buf, v.f); ESPRPC_WRITE_5(v, __VA_ARGS__)
 #define ESPRPC_WRITE_7(v, f, ...) ::esprpc::write(buf, v.f); ESPRPC_WRITE_6(v, __VA_ARGS__)
 #define ESPRPC_WRITE_8(v, f, ...) ::esprpc::write(buf, v.f); ESPRPC_WRITE_7(v, __VA_ARGS__)
+#define ESPRPC_WRITE_9(v, f, ...) ::esprpc::write(buf, v.f); ESPRPC_WRITE_8(v, __VA_ARGS__)
+#define ESPRPC_WRITE_10(v, f, ...) ::esprpc::write(buf, v.f); ESPRPC_WRITE_9(v, __VA_ARGS__)
+#define ESPRPC_WRITE_11(v, f, ...) ::esprpc::write(buf, v.f); ESPRPC_WRITE_10(v, __VA_ARGS__)
+#define ESPRPC_WRITE_12(v, f, ...) ::esprpc::write(buf, v.f); ESPRPC_WRITE_11(v, __VA_ARGS__)
+#define ESPRPC_WRITE_13(v, f, ...) ::esprpc::write(buf, v.f); ESPRPC_WRITE_12(v, __VA_ARGS__)
+#define ESPRPC_WRITE_14(v, f, ...) ::esprpc::write(buf, v.f); ESPRPC_WRITE_13(v, __VA_ARGS__)
+#define ESPRPC_WRITE_15(v, f, ...) ::esprpc::write(buf, v.f); ESPRPC_WRITE_14(v, __VA_ARGS__)
+#define ESPRPC_WRITE_16(v, f, ...) ::esprpc::write(buf, v.f); ESPRPC_WRITE_15(v, __VA_ARGS__)
 
 #define ESPRPC_READ_0(v, r)
 #define ESPRPC_READ_1(v, r, f) ::esprpc::read(r, v.f);
@@ -397,6 +421,14 @@ void stream_emit(uint16_t method_id, const T &v) {
 #define ESPRPC_READ_6(v, r, f, ...) ::esprpc::read(r, v.f); ESPRPC_READ_5(v, r, __VA_ARGS__)
 #define ESPRPC_READ_7(v, r, f, ...) ::esprpc::read(r, v.f); ESPRPC_READ_6(v, r, __VA_ARGS__)
 #define ESPRPC_READ_8(v, r, f, ...) ::esprpc::read(r, v.f); ESPRPC_READ_7(v, r, __VA_ARGS__)
+#define ESPRPC_READ_9(v, r, f, ...) ::esprpc::read(r, v.f); ESPRPC_READ_8(v, r, __VA_ARGS__)
+#define ESPRPC_READ_10(v, r, f, ...) ::esprpc::read(r, v.f); ESPRPC_READ_9(v, r, __VA_ARGS__)
+#define ESPRPC_READ_11(v, r, f, ...) ::esprpc::read(r, v.f); ESPRPC_READ_10(v, r, __VA_ARGS__)
+#define ESPRPC_READ_12(v, r, f, ...) ::esprpc::read(r, v.f); ESPRPC_READ_11(v, r, __VA_ARGS__)
+#define ESPRPC_READ_13(v, r, f, ...) ::esprpc::read(r, v.f); ESPRPC_READ_12(v, r, __VA_ARGS__)
+#define ESPRPC_READ_14(v, r, f, ...) ::esprpc::read(r, v.f); ESPRPC_READ_13(v, r, __VA_ARGS__)
+#define ESPRPC_READ_15(v, r, f, ...) ::esprpc::read(r, v.f); ESPRPC_READ_14(v, r, __VA_ARGS__)
+#define ESPRPC_READ_16(v, r, f, ...) ::esprpc::read(r, v.f); ESPRPC_READ_15(v, r, __VA_ARGS__)
 
 #define ESPRPC_SERIALIZE(T, ...)                                                               \
     namespace esprpc {                                                                         \

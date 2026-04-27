@@ -14,6 +14,7 @@
 #include "esprpc_service.h"
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "freertos/semphr.h"
 #include <string.h>
 #include <stdlib.h>
@@ -93,8 +94,12 @@ static int s_transport_count = 0;
 static esprpc_on_recv_fn s_on_recv = NULL;
 static void *s_recv_user_ctx = NULL;
 
-/** 当前 stream 的 method_id（dispatch 设置，impl 可读取并保存） */
-static uint16_t s_stream_method_id = ESPRPC_STREAM_METHOD_ID_NONE;
+/** FreeRTOS TLS slot 用于 stream method_id */
+#ifndef ESPRPC_STREAM_TLS_SLOT
+#define ESPRPC_STREAM_TLS_SLOT 0
+#endif
+_Static_assert(ESPRPC_STREAM_TLS_SLOT < configNUM_THREAD_LOCAL_STORAGE_POINTERS,
+               "ESPRPC_STREAM_TLS_SLOT exceeds configNUM_THREAD_LOCAL_STORAGE_POINTERS");
 
 /** 传输层统一回调包装（若使用 esprpc_set_recv_callback 时可传入此函数） */
 static void transport_recv_cb(const uint8_t *data, size_t len, void *user_ctx)
@@ -207,12 +212,15 @@ esp_err_t esprpc_send(const uint8_t *data, size_t len)
 
 void esprpc_set_stream_method_id(uint16_t method_id)
 {
-    s_stream_method_id = method_id;
+    vTaskSetThreadLocalStoragePointer(NULL, ESPRPC_STREAM_TLS_SLOT,
+                                      (void *)(uintptr_t)(method_id + 1));
 }
 
 uint16_t esprpc_get_stream_method_id(void)
 {
-    return s_stream_method_id;
+    void *v = pvTaskGetThreadLocalStoragePointer(NULL, ESPRPC_STREAM_TLS_SLOT);
+    if (!v) return ESPRPC_STREAM_METHOD_ID_NONE;
+    return (uint16_t)((uintptr_t)v - 1);
 }
 
 esp_err_t esprpc_stream_emit(uint16_t method_id, const uint8_t *data, size_t len)

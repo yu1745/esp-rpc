@@ -4,11 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "gen": "python ../../generator/main.py -o generated ../../projects/esp_test/main/user_service.hpp",
+    "gen": "python ../../generator/main.py -o . ../../projects/esp_test/main/user_service.hpp",
     "start": "tsx main.ts"
   },
-  "dependencies": {},
   "devDependencies": {
+    "@types/node": "^25.6.0",
     "tsx": "^4.19.2",
     "typescript": "^5.9.3"
   }

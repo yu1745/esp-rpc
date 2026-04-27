@@ -7,11 +7,16 @@
 
 enum UserStatus { ACTIVE = 1, INACTIVE = 2, DELETED = 3 };
 
+template <> struct esprpc::Serializer<UserStatus> {
+    static void write(esprpc::Buffer &buf, UserStatus v) { buf.write_i32((int32_t)v); }
+    static void read(esprpc::Reader &r, UserStatus &v) { int32_t tmp = r.read_i32(); v = (UserStatus)tmp; }
+};
+
 ESPRPC_STRUCT(User,
     (id, int32_t),
     (name, esprpc::StringBuf),
     (email, esprpc::Optional<esprpc::StringBuf>),
-    (status, int32_t)
+    (status, UserStatus)
 )
 
 ESPRPC_STRUCT(CreateUserRequest,
@@ -24,7 +29,7 @@ ESPRPC_STRUCT(UserResponse,
     (id, int32_t),
     (name, esprpc::StringBuf),
     (email, esprpc::StringBuf),
-    (status, int32_t)
+    (status, UserStatus)
 )
 
 /* ---------- 服务实现 ---------- */
